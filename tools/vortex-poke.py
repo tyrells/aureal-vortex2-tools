@@ -27,10 +27,11 @@ timestamp (the same clock as qemu-trace.log) for alignment.
                                                  HRTF and ITD registers every ~100 us for 1 s (binary samples
                                                  in glide.bin, events in the log), so the glide law is read
                                                  straight off the hardware instead of out of the audio
-  sudo ./vortex-poke.py wtfilt [--log FILE] [--hold SECS]
+  sudo ./vortex-poke.py wtfilt [--log FILE] [--hold SECS] [--rest]
                                                  run alongside 'A3DTEST wtnoise': steps the wavetable voice's
                                                  filter cut-off, feedback, input gain, gain and pan words
-                                                 under steady noise, 2.5 s per step (about 2.5 minutes)
+                                                 under steady noise, 2.5 s per step (about 2.5 minutes;
+                                                 --rest skips the cut-off sweep, about 1 minute)
   sudo ./vortex-poke.py run15 [--log FILE]       start before 'A3DTEST run15': during its dshold test, clears
                                                  and restores the playing voices' DSREG bits (3 s each, about
                                                  25 s); during eqhold, one EQ band with the bypass at +1, -1
@@ -655,12 +656,22 @@ def wtfilt(bar, note, hold=2.5):
         bar.wr(base, w0); bar.wr(base + 8, w2); bar.wr(base + 12, w3)
         return w0, w2, w3
     try:
-        for i, (name, f) in enumerate(wtfilt_schedule()):
+        sched = wtfilt_schedule()
+        if '--rest' in sys.argv:            # skip the cut-off sweep: start at the feedback steps
+            k = next(i for i, (n, f) in enumerate(sched) if 'fb' in f)
+            sched = sched[:1] + sched[k:]
+        for i, (name, f) in enumerate(sched):
             w = apply(f)
             note(event='wf_step', index=i, name=name, wrote=[hex(x) for x in w])
             time.sleep(hold)
             back = [bar.rd(base + 4 * k) for k in (0, 2, 3)]
-            if not bar.rd(WT_FIFO + 4 * v) & 0x10:
+            stopped = True                      # the valid bit drops out briefly while playing: ask several times
+            for _ in range(20):
+                if bar.rd(WT_FIFO + 4 * v) & 0x10 and bar.rd(base) & 0xfffe == 0xa000:
+                    stopped = False
+                    break
+                time.sleep(0.01)
+            if stopped:
                 note(event='wf_voice_stopped', index=i)
                 break
             if [b & 0xffff for b in back] != [x & 0xffff for x in w] or (back[0] >> 16 and back[0] != w[0]):

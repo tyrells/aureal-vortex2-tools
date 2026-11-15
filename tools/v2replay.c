@@ -170,6 +170,18 @@ deterministic(uint32_t a)
     return a == 0x29850 || (a >= 0x28000 && a < 0x28310) || (a >= 0x21000 && a < 0x21c00);
 }
 
+/* -c: a 3 kHz tone at 0.1 of full scale on the codec's ADC (where CD audio enters), to
+   check that path through a trace's mixer settings. */
+static int adc_tone;
+static void
+adc_gen(void *priv, float *l, float *r, int n)
+{
+    static uint32_t k;
+    (void) priv;
+    for (int i = 0; i < n; i++, k++)
+        l[i] = r[i] = 0.1f * (float) sin(2.0 * M_PI * 3000.0 * k / 48000.0);
+}
+
 int
 main(int argc, char **argv)
 {
@@ -178,11 +190,12 @@ main(int argc, char **argv)
     int         all = 0, verbose = 0, quad = 0, opt, solo[2] = { -1, -1 };
     const char *usage = "usage: v2replay [-o out.raw] [-t seconds] [-a] [-v] [-l] [-d dma.bin] [-s src[,src]] [-q] TIMELINE\n";
 
-    while ((opt = getopt(argc, argv, "o:t:avld:s:q")) != -1) {
+    while ((opt = getopt(argc, argv, "o:t:avld:s:qc")) != -1) {
         switch (opt) {
             case 'o': outname = optarg; break;
             case 't': tmax = atof(optarg); break;
             case 'a': all = 1; break;
+            case 'c': adc_tone = 1; break;
             case 'v': verbose = 1; break;
             case 'l': show_log = 1; break;
             case 'd': dmaname = optarg; break;
@@ -237,6 +250,8 @@ main(int argc, char **argv)
     codec[0x26 >> 1] = 0x000f;
 
     v2_host_t  h = { NULL, mem_read, mem_write, set_irq, timer_arm, clk, cread, cwrite, logmsg };
+    if (adc_tone)
+        h.codec_adc = adc_gen;
     v2_chip_t *c = v2_create(&h);
 
     static uint32_t mism[MAX_REGS];

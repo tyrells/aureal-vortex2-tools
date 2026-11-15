@@ -23,6 +23,8 @@
  *   run13 = sync reflhf: reflection tone and level against wall reflectance (about 70 s)
  *   run16 = run15 with A3D never opened (dssync instead of sync): DirectSound as the
  *           driver's only client, as in a game's DirectSound mode
+ *   run18 = sync wttone: steady tones on a wavetable voice at each common rate (its 4-point
+ *           interpolator) and a panned native tone (about 2 minutes)
  *   run15 = sync dsfill dshold eqhold dswt ds3d dsstream: DirectSound buffers on wavetable
  *           voices (where they land, levels, volume/pan/frequency, stereo, 8-bit, DS3D,
  *           streaming), with dshold and eqhold held for 'vortex-poke.py run15' on the host
@@ -177,7 +179,8 @@ static void place(SRC *s, double az_deg, double el_deg, double r) {
 }
 
 /* ------------------------------------------------------------------ stimuli */
-enum { STIM_CLICK, STIM_NOISE, STIM_TONE, STIM_CLICKNOISE, STIM_CLICK_L, STIM_CLICK_R, STIM_TONE250 };
+enum { STIM_CLICK, STIM_NOISE, STIM_TONE, STIM_CLICKNOISE, STIM_CLICK_L, STIM_CLICK_R, STIM_TONE250, STIM_TONEF, STIM_SILENCE };
+static int g_tone_hz = 1000;   /* STIM_TONEF: a whole number of hertz, so a 1 s loop holds whole cycles */
 
 static unsigned long rng = 12345;
 static int noise16(void) { rng = rng * 1103515245UL + 12345UL; return (int)((rng >> 16) & 0x7fff) - 16384; }
@@ -197,6 +200,8 @@ static void *make_wave(int kind, int rate, int ch, int bits, double secs, DWORD 
         case STIM_CLICKNOISE: v = (i % rate == 0) ? 29000 : ((i % rate) > rate / 2 ? noise16() / 2 : 0); break;
         case STIM_CLICK_L: case STIM_CLICK_R: v = (i % click_every == 0) ? 29000 : 0; break;
         case STIM_TONE250:    v = (int)(12000 * dsin(ph)); ph += dph / 4; if (ph > 2 * PI) ph -= 2 * PI; break;
+        case STIM_TONEF:      v = (int)(12000 * dsin(2 * PI * (double)((long)i * g_tone_hz % rate) / rate)); break;
+        case STIM_SILENCE:    v = 0; break;
         }
         for (c = 0; c < ch; c++) {
             int vc = (ch == 2 && c == 1 && kind == STIM_TONE) ? v / 2 : v;   /* right channel -6 dB, so L/R are distinguishable */
@@ -1482,6 +1487,70 @@ static void t_dssync(void) {
     logmsg("TEST dssync end");
 }
 
+
+/* ================================================================== run 18 */
+/* wttone: steady tones on a wavetable voice, for its 4-point interpolator and its pan.
+   Part A: twelve silent 3D sources take the ADB channels (run 11: eleven are free, after
+   which A3D sources get second-half wavetable voices 0-3 at the source's own rate and unity
+   gain), then a tone source in front, 1 m away, at each common rate. The tone is 0.2 x the
+   source rate, so the interpolator's images (k x rate +- tone) land in band at a level that
+   tells interpolation kernels apart. Headphones, so the canceller is a plain gain.
+   Part B: with the silent bed still holding the ADB channels, a native (non-3D) tone, panned
+   with SetPanValues; the trace shows whether it lands on a wavetable voice and what the
+   driver writes for pan. 4 s per step; about 2 minutes. */
+static void t_wttone(void) {
+    static const int rates[] = { 8000, 11025, 22050, 32000, 44100 };
+    static const double pitch[] = { 0.75, 1.3 };
+    static const float pans[][2] = { {1, 1}, {1, 0}, {0, 1}, {1, 0.5f}, {0.5f, 1}, {1, 0.25f}, {0.25f, 1}, {0.5f, 0.5f} };
+    SRC all[13]; int i, r, n = 0;
+    logmsg("TEST wttone begin (headphones; 12 silent 3D sources, then a tone of 0.2 x the source rate; 4 s per step)");
+    headphones();
+    memset(all, 0, sizeof all);
+    for (i = 0; i < 12; i++) {                      /* the silent bed */
+        all[i].src = new_source(0, STIM_SILENCE, 22050, 1, 16, 1.0);
+        if (!all[i].src) break;
+        place(&all[i], i * 30.0 + 15.0, 0, 2.0);
+        IA3dSource_Play(all[i].src, A3D_LOOPED);
+        hold(all, i + 1, 250);
+    }
+    L_begin(); L_s("STEP wttone n="); L_i(n++); L_s(" bed="); L_i(i); L_end();
+    hold(all, 12, 1000);
+    for (r = 0; r < 5; r++) {                       /* Part A */
+        g_tone_hz = rates[r] / 5;
+        all[12].src = new_source(0, STIM_TONEF, rates[r], 1, 16, 1.0);
+        if (!all[12].src) continue;
+        place(&all[12], 0, 0, 1.0);
+        IA3dSource_Play(all[12].src, A3D_LOOPED);
+        L_begin(); L_s("STEP wttone n="); L_i(n++); L_kv("rate", rates[r], 0); L_kv("tone", g_tone_hz, 0); L_end();
+        hold(all, 13, 4000);
+        if (r == 1) {
+            for (i = 0; i < 2; i++) {
+                IA3dSource_SetPitch(all[12].src, (A3DVAL)pitch[i]);
+                L_begin(); L_s("STEP wttone n="); L_i(n++); L_kv("rate", rates[r], 0); L_kv("tone", g_tone_hz, 0); L_kv("pitch", pitch[i], 2); L_end();
+                hold(all, 13, 4000);
+            }
+        }
+        kill_source(&all[12]);
+        hold(all, 12, 500);
+    }
+    g_tone_hz = 22050 / 5;                          /* Part B */
+    all[12].src = new_source(1, STIM_TONEF, 22050, 1, 16, 1.0);
+    if (all[12].src) {
+        IA3dSource_Play(all[12].src, A3D_LOOPED);
+        for (i = 0; i < 8; i++) {
+            A3DVAL pv[2]; pv[0] = (A3DVAL)pans[i][0]; pv[1] = (A3DVAL)pans[i][1];
+            IA3dSource_SetPanValues(all[12].src, 2, pv);
+            L_begin(); L_s("STEP wttone n="); L_i(n++); L_s(" native=1"); L_kv("rate", 22050, 0); L_kv("tone", g_tone_hz, 0);
+            L_kv("pan_l", pans[i][0], 2); L_kv("pan_r", pans[i][1], 2); L_end();
+            hold(all, 13, 4000);
+        }
+        kill_source(&all[12]);
+    }
+    for (i = 0; i < 12; i++) kill_source(&all[i]);
+    g_tone_hz = 1000;
+    logmsg("TEST wttone end");
+}
+
 /* ------------------------------------------------------------------ main */
 typedef void (*TESTFN)(void);
 static const struct { const char *name; TESTFN fn; } tests[] = {
@@ -1492,7 +1561,7 @@ static const struct { const char *name; TESTFN fn; } tests[] = {
     {"multi", t_multi}, {"dsound", t_dsound}, {"elev5", t_elev5}, {"tcsweep", t_tcsweep}, {"click90", t_click90}, {"noise2d", t_noise2d}, {"wtpath", t_wtpath},
     {"srcresp", t_srcresp}, {"midi", t_midi}, {"level", t_level}, {"hrtfgrid", t_hrtfgrid}, {"reflhf", t_reflhf},
     {"dsfill", t_dsfill}, {"dshold", t_dshold}, {"eqhold", t_eqhold}, {"dswt", t_dswt}, {"ds3d", t_ds3d}, {"dsstream", t_dsstream},
-    {"dssync", t_dssync},
+    {"dssync", t_dssync}, {"wttone", t_wttone},
 };
 static int g_noa3d;     /* run16: A3D is never opened, so DirectSound is the driver's only client */
 /* default (no arguments): the run-2 suite */
@@ -1564,6 +1633,7 @@ void entry(void) {
         else if (seq(tok, "run13")) { t_sync(); t_reflhf(); }
         else if (seq(tok, "run15")) { t_sync(); t_dsfill(); t_dshold(); t_eqhold(); t_dswt(); t_ds3d(); t_dsstream(); }
         else if (seq(tok, "run16")) { t_dssync(); t_dsfill(); t_dshold(); t_eqhold(); t_dswt(); t_ds3d(); t_dsstream(); }
+        else if (seq(tok, "run18")) { t_sync(); t_wttone(); }
         else if (seq(tok, "run12")) { t_sync(); t_srcresp(); t_level(); t_midi(); t_hrtfgrid(); }
         else run_named(tok);
         ran = 1;

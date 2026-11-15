@@ -484,7 +484,20 @@ Starting a voice: the driver clears the voice's 64-word FIFO (`0x10000` + global
 
   This replaces the earlier reading from run 14 (a second-order filter, Q 0.64, with a fitted cut-off curve). Run 14 only had each setting relative to another through a reflection, which could not separate the orders; the map's author had it right that the filter is fourth order.
 
-  **Feedback (Hypothesis, one step).** The second voice word's upper half (`PARM2` bits 31–16, 2.14) feeds the output back to the input, as in a ladder filter. With F = 0.25, `0x1000` dropped the pass band by 14 dB and left a 6 dB peak at 1.8 kHz; x′ = x − K × y[n−1] around the four stages fits that with K = 3.75 (1.2 dB rms), so K is about 16 × the 2.14 value. `0x2000` gave broadband noise 8.5 dB down, which is the loop unstable. The driver always writes 0, and the emulator does not model the feedback. The low half of `PARM2` read back as a changing value (`0x5825`): it is the live pitch phase.
+  **Feedback (measured, not decoded; run 19b).** The second voice word's upper half (`PARM2` bits 31–16) adds resonance around the four stages, but not as a plain linear feedback gain. With the cut-off at `0xb0` (F = 0.25) and at `0xa0` (F = 0.125):
+
+  | Feedback word | Pass band | Peak |
+  | --- | --- | --- |
+  | 0 (the driver's value) | 0 dB | none |
+  | `0x1000` | −13.5 dB | +0.9 dB at 2.27 kHz (F = 0.25); +5.2 dB at 1.03 kHz (F = 0.125) |
+  | `0x2000` | −13.0 dB | −0.2 dB; +2.9 dB |
+  | `0x3000` | −12.7 dB | −1.2 dB; +2.0 dB |
+  | `0x3800` | −12.3 dB | −1.3 dB; +1.5 dB |
+  | `0xe000` | −3.4 dB | none |
+
+  The peak sits at about 1.2 × F × 48 kHz / 2π, where four stages have turned the phase half a cycle, so the loop does go round all four. But the pass band drops by the same 13 dB for every positive value, the peak gets lower as the value rises, and a ladder loop x′ = x − K·y fits none of the steps better than 2 dB (K would be 3–5 for all four positive values and 0.5 for `0xe000`). A saturating loop gain, or clipping inside the loop, would behave like this; the field's format is not established. The driver always writes 0, and the emulator does not model the feedback. The low half of `PARM2` read back as a changing value: it is the live pitch phase.
+
+  **Gain codes, input gain and pan (Confirmed, run 19b).** The same run stepped the other fields under the same noise. Gain bytes `0xce`, `0xc8`, `0xc0`, `0xbf`, `0xb8` and `0xb0` gave 0.970, 0.766, 0.502, 0.501, 0.383 and 0.251 of the level at `0xcf`; the expansion with the mantissa repeated gives 0.967, 0.767, 0.500, 0.500, 0.383 and 0.250. The filter input gain (`PARM3` bits 31–24) uses the same code and acts ahead of the filter: `0xbf` and `0xaf` gave exactly 0.501 and 0.250 at every frequency, with the filter open or closed. The pan field does nothing to a voice that feeds an A3D source (`0x00`, `0x20` and `0x7f` all within 0.03 dB).
 
 **Interpolation (Confirmed, run 18).** A wavetable voice playing away from 48 kHz interpolates with the cubic Lagrange polynomial through four input samples (Aureal documents "4 point interpolation"). Run 18 forced a 3D tone onto a wavetable voice by occupying the ADB channels with twelve silent sources first: the tone took second-half voice 5, at rate words `0x4aaa` (8 kHz), `0x5acc` (11.025), `0x7acc` (22.05), `0x8aaa` (32) and `0x9acc` (44.1 kHz). Each tone was 0.2 × the rate, so the interpolator's images fell in band. Simulating each candidate end to end at 48 kHz (images fold onto one another there) and correcting for the front HRTF, the 46 measurable lines matched cubic Lagrange with a median error of 2.2 dB (2.2 dB rms over the 22 lines at 11.025 kHz). Catmull-Rom, which the model used before, was off by a median 7.4 dB and up to 20 dB; linear and cubic B-spline interpolation are far off (13.7 and 22.5 dB). Two things do not fit any 4-point kernel and are not explained: at 8 kHz three images are 6–10 dB below Lagrange, and at 44.1 kHz the image at 16.62 kHz (twice the rate less the tone) is 40 dB below it. The emulator uses cubic Lagrange.
 

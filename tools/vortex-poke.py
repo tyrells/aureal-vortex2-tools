@@ -27,6 +27,10 @@ timestamp (the same clock as qemu-trace.log) for alignment.
                                                  HRTF and ITD registers every ~100 us for 1 s (binary samples
                                                  in glide.bin, events in the log), so the glide law is read
                                                  straight off the hardware instead of out of the audio
+  sudo ./vortex-poke.py wtfilt [--log FILE] [--hold SECS]
+                                                 run alongside 'A3DTEST wtnoise': steps the wavetable voice's
+                                                 filter cut-off, feedback, input gain, gain and pan words
+                                                 under steady noise, 2.5 s per step (about 2.5 minutes)
   sudo ./vortex-poke.py run15 [--log FILE]       start before 'A3DTEST run15': during its dshold test, clears
                                                  and restores the playing voices' DSREG bits (3 s each, about
                                                  25 s); during eqhold, one EQ band with the bypass at +1, -1
@@ -136,6 +140,13 @@ def main():
             kw['utc'] = utc(); line = json.dumps(kw); log.write(line + '\n'); log.flush(); print(line)
         hold = float(sys.argv[sys.argv.index('--hold') + 1]) if '--hold' in sys.argv else 3.0
         xtshift(bar, note, hold)
+        return
+    if cmd == 'wtfilt':
+        log = open(logpath, 'a')
+        def note(**kw):
+            kw['utc'] = utc(); line = json.dumps(kw); log.write(line + '\n'); log.flush(); print(line)
+        hold = float(sys.argv[sys.argv.index('--hold') + 1]) if '--hold' in sys.argv else 2.5
+        wtfilt(bar, note, hold)
         return
     if cmd == 'eqsweep':
         log = open(logpath, 'a')
@@ -586,6 +597,79 @@ def xtident(bar, note, hold=3.0, latch=False):
     finally:
         restore()
         note(event='xi_restored')
+
+
+def wtfilt_schedule():
+    """Steps for wtfilt: (name, {field: value}); fields not named are at the driver's values.
+    Fields: fc (PARM0 31-24), gain (PARM0 23-16), fb (PARM2 31-16), ingain (PARM3 31-24),
+    pan (PARM3 20-14)."""
+    ref = ('reference (driver values)', {})
+    s = [ref]
+    for i, b in enumerate([0xcc, 0xc8, 0xc4, 0xc0, 0xbc, 0xb8, 0xb4, 0xb0, 0xac, 0xa8, 0xa4, 0xa0,
+                           0x98, 0x90, 0x88, 0x80, 0x70, 0x60, 0x40]):
+        s.append((f'fc={b:#04x}', {'fc': b}))
+        if i % 8 == 7:
+            s.append(ref)
+    s.append(ref)
+    for b in (0xb1, 0xb2, 0xb3, 0xb5, 0xb7, 0xb9, 0xbb, 0xbd, 0xbf, 0xaf, 0x9f):   # the mantissa within an exponent
+        s.append((f'fc={b:#04x}', {'fc': b}))
+    s.append(ref)
+    for fc in (0xb0, 0xa0):                                # feedback (resonance), 2.14
+        for fb in (0x1000, 0x2000, 0x3000, 0x3800, 0xe000):
+            s.append((f'fc={fc:#04x} fb={fb:#06x}', {'fc': fc, 'fb': fb}))
+        s.append(ref)
+    for fc in (0xcf, 0xa0):                                # filter input gain
+        for g in (0xbf, 0xaf):
+            s.append((f'fc={fc:#04x} ingain={g:#04x}', {'fc': fc, 'ingain': g}))
+    s.append(ref)
+    for g in (0xce, 0xc8, 0xc0, 0xbf, 0xb8, 0xb0):         # the gain byte's expansion
+        s.append((f'gain={g:#04x}', {'gain': g}))
+    s.append(ref)
+    for pan in (0x00, 0x20, 0x7f):                         # does pan reach a voice feeding an A3D source?
+        s.append((f'pan={pan:#04x}', {'pan': pan}))
+    s.append(ref)
+    return s
+
+
+def wtfilt(bar, note, hold=2.5):
+    """Run alongside 'A3DTEST wtnoise': noise on a second-half wavetable voice at 48 kHz."""
+    print('waiting for a second-half wavetable voice playing at 48 kHz (run "A3DTEST wtnoise" in Windows)...')
+    v = None
+    while v is None:
+        for k in range(32, 64):
+            if bar.rd(WT_FIFO + 4 * k) & 0x10 and bar.rd(WT_PARM(k)) & 0xfffe == 0xa000:
+                v = k
+        time.sleep(0.2)
+    time.sleep(2.0)
+    base = WT_PARM(v)
+    read = [bar.rd(base + 4 * k) for k in range(4)]
+    # the driver's steady values for such a voice; used if the host cannot read the words back in full
+    p0 = read[0] if read[0] >> 16 else 0xcfcfa000
+    p2 = read[2]
+    p3 = read[3] if read[3] >> 21 else 0xcff00000
+    note(event='wf_found', voice=v, read=[hex(x) for x in read], using=[hex(p0), hex(p2), hex(p3)], hold=hold)
+    def apply(f):
+        w0 = (p0 & 0x0000ffff) | (f.get('fc', p0 >> 24) << 24) | (f.get('gain', (p0 >> 16) & 0xff) << 16)
+        w2 = (p2 & 0x0000ffff) | (f.get('fb', p2 >> 16) << 16)
+        w3 = (p3 & 0x00e03fff) | (f.get('ingain', p3 >> 24) << 24) | (f.get('pan', (p3 >> 14) & 0x7f) << 14)
+        bar.wr(base, w0); bar.wr(base + 8, w2); bar.wr(base + 12, w3)
+        return w0, w2, w3
+    try:
+        for i, (name, f) in enumerate(wtfilt_schedule()):
+            w = apply(f)
+            note(event='wf_step', index=i, name=name, wrote=[hex(x) for x in w])
+            time.sleep(hold)
+            back = [bar.rd(base + 4 * k) for k in (0, 2, 3)]
+            if not bar.rd(WT_FIFO + 4 * v) & 0x10:
+                note(event='wf_voice_stopped', index=i)
+                break
+            if [b & 0xffff for b in back] != [x & 0xffff for x in w] or (back[0] >> 16 and back[0] != w[0]):
+                note(event='wf_changed_under_us', index=i, readback=[hex(x) for x in back])
+    except KeyboardInterrupt:
+        note(event='interrupted')
+    finally:
+        apply({})
+        note(event='wf_restored')
 
 
 def xtshift_schedule(orig):

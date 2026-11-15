@@ -25,6 +25,7 @@
  *           driver's only client, as in a game's DirectSound mode
  *   run18 = sync wttone: steady tones on a wavetable voice at each common rate (its 4-point
  *           interpolator) and a panned native tone (about 2 minutes)
+ *   wtnoise = steady noise on a wavetable voice for 200 s (for vortex-poke.py wtfilt)
  *   run15 = sync dsfill dshold eqhold dswt ds3d dsstream: DirectSound buffers on wavetable
  *           voices (where they land, levels, volume/pan/frequency, stereo, 8-bit, DS3D,
  *           streaming), with dshold and eqhold held for 'vortex-poke.py run15' on the host
@@ -1551,6 +1552,36 @@ static void t_wttone(void) {
     logmsg("TEST wttone end");
 }
 
+/* wtnoise: steady noise on a wavetable voice for 'vortex-poke.py wtfilt' on the host, which
+   steps the voice's filter, gain and pan words. Twelve silent 22.05 kHz 3D sources take the
+   ADB channels (and, as run 18 showed, the first few second-half voices); a 48 kHz noise
+   source in front then lands on a second-half voice at rate word 0xa000, with no
+   interpolation in the way. Headphones. Gain 0.25 leaves room for the filter's resonance.
+   200 s. */
+static void t_wtnoise(void) {
+    SRC all[13]; int i;
+    logmsg("TEST wtnoise begin (headphones; 12 silent 3D sources, then 48 kHz noise at gain 0.25, front, 1 m; 200 s for vortex-poke.py wtfilt)");
+    headphones();
+    memset(all, 0, sizeof all);
+    for (i = 0; i < 12; i++) {
+        all[i].src = new_source(0, STIM_SILENCE, 22050, 1, 16, 1.0);
+        if (!all[i].src) break;
+        place(&all[i], i * 30.0 + 15.0, 0, 2.0);
+        IA3dSource_Play(all[i].src, A3D_LOOPED);
+        hold(all, i + 1, 250);
+    }
+    all[12].src = new_source(0, STIM_NOISE, 48000, 1, 16, 4.0);
+    if (all[12].src) {
+        IA3dSource_SetGain(all[12].src, 0.25f);
+        place(&all[12], 0, 0, 1.0);
+        IA3dSource_Play(all[12].src, A3D_LOOPED);
+        L_begin(); L_s("STEP wtnoise n=0 bed="); L_i(i); L_end();
+        hold(all, 13, 200000);
+    }
+    for (i = 0; i < 13; i++) kill_source(&all[i]);
+    logmsg("TEST wtnoise end");
+}
+
 /* ------------------------------------------------------------------ main */
 typedef void (*TESTFN)(void);
 static const struct { const char *name; TESTFN fn; } tests[] = {
@@ -1561,7 +1592,7 @@ static const struct { const char *name; TESTFN fn; } tests[] = {
     {"multi", t_multi}, {"dsound", t_dsound}, {"elev5", t_elev5}, {"tcsweep", t_tcsweep}, {"click90", t_click90}, {"noise2d", t_noise2d}, {"wtpath", t_wtpath},
     {"srcresp", t_srcresp}, {"midi", t_midi}, {"level", t_level}, {"hrtfgrid", t_hrtfgrid}, {"reflhf", t_reflhf},
     {"dsfill", t_dsfill}, {"dshold", t_dshold}, {"eqhold", t_eqhold}, {"dswt", t_dswt}, {"ds3d", t_ds3d}, {"dsstream", t_dsstream},
-    {"dssync", t_dssync}, {"wttone", t_wttone},
+    {"dssync", t_dssync}, {"wttone", t_wttone}, {"wtnoise", t_wtnoise},
 };
 static int g_noa3d;     /* run16: A3D is never opened, so DirectSound is the driver's only client */
 /* default (no arguments): the run-2 suite */

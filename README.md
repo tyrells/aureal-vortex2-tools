@@ -14,7 +14,7 @@ The main finding behind the emulation: Aureal's Windows driver computes the HRTF
 | [`docs/`](docs/README.md) | Technical reference: registers, the A3D engine, routing and timing, measured behaviour, procedures | — |
 | `core/` | The chip model, the same code as the 86Box device; no 86Box dependencies | No |
 | `tools/v2replay.c` | Replays a traced session into the model and checks every register read against the card | No |
-| `data/xtalk/` | The crosstalk-canceller model | No |
+| `data/xtalk/` | The crosstalk canceller's arithmetic and presets | No |
 | `tools/hrtf_extract.py`, `tools/make_mhr.py` | Read the driver's direction table out of a traced run; turn it into an OpenAL Soft HRTF set | Yes (to capture) |
 | `tools/vortex_trace.py`, `tools/a3d_params.py`, `tools/a3d_slices.py` | Turn QEMU traces into register timelines and A3D parameters | No |
 | `tools/vortexprobe.py` | PCI identity, register snapshots (cold and running), decoding of routing, converters, DMA and codec | Yes |
@@ -48,6 +48,6 @@ These are not in the repository, because they are not ours to distribute or are 
 
 ## Licence and credits
 
-GPL-2.0-or-later (see `LICENSE`), to match 86Box. The canceller model is a measurement of the card's response under Aureal's driver. The driver's direction table is included (`data/hrtf/`): the table as captured from a real SQ2500, and the OpenAL Soft HRTF set built from Aureal's "Ed's Ears" profile, which is the same table with lower elevations added; Appendix A explains how it was read out.
+GPL-2.0-or-later (see `LICENSE`), to match 86Box. The canceller's preset words are the ones Aureal's driver loads (also in ALSA's `au88x0_xtalk.c`). The driver's direction table is included (`data/hrtf/`): the table as captured from a real SQ2500, and the OpenAL Soft HRTF set built from Aureal's "Ed's Ears" profile, which is the same table with lower elevations added; Appendix A explains how it was read out.
 
 Hardware, testing and direction: Z2k Retro. The tools, chip model and documentation were written with substantial help from Claude, Anthropic's AI model. Statements marked as measured were checked on a real SQ2500 by the methods in Appendix C; the rest come from the Linux driver or from the 86Box model's behaviour, as the reference says for each.

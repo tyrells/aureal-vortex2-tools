@@ -1,12 +1,13 @@
 # Aureal Vortex 2 technical reference
 
-What an Aureal Vortex 2 (AU8830, as on the SQ2500) does, and how Aureal's Windows 98 driver drives it. It is written to be enough to emulate the chip or to replace its driver. Facts come from three places, and each section says which:
+What an Aureal Vortex 2 (AU8830, as on the SQ2500) does, and how Aureal's Windows 98 driver drives it, **reverse-engineered from a real card**. Aureal never published this, and nothing here comes from its source code or internal documents. It is written to be enough to emulate the chip or to replace its driver. Facts come from four places, and each section says which:
 
 - the Linux ALSA `au88x0` driver, which names most registers;
 - measurement of a real SQ2500 under Aureal's driver 4.06.2048, with every register access traced and the output recorded;
-- host-side experiments that read and write the card's registers directly.
+- host-side experiments that read and write the card's registers directly while it plays;
+- an independent reverse engineer's register map of the chip and descriptions from Aureal that its author relayed, used as leads and checked against the card.
 
-Each finding is tagged **Confirmed**, **Strong** or **Hypothesis** by how well it is established.
+Each finding is tagged **Confirmed**, **Strong**, **Plausible** or **Hypothesis** by how well it is established. Where the model still rests on an assumption, the text says so.
 
 ## Documents
 
@@ -23,5 +24,5 @@ Each finding is tagged **Confirmed**, **Strong** or **Hypothesis** by how well i
 | | Appendix | Contents |
 | --- | --- | --- |
 | A | [Direction table](appendix-a-direction-table.md) | The structure of the driver's HRTF and ITD table, its interpolation, and how to read it out |
-| B | [Crosstalk-canceller model](appendix-b-crosstalk-model.md) | The measured model of Aureal's three speaker presets |
+| B | [Crosstalk canceller](appendix-b-crosstalk-model.md) | The canceller's decoded arithmetic, Aureal's three speaker presets, and the evidence |
 | C | [Measuring and testing](appendix-c-workflow.md) | Traced sessions, probes, the test program and trace replay, step by step |

@@ -1,10 +1,12 @@
 # Aureal Vortex 2 (AU8830) hardware reference
 
-Last updated 2026-11-01 · [Z2k Retro](https://github.com/z2k-retro) · see [the appendices](README.md) for data, formats and procedures
+Last updated 2026-11-15 · [Z2k Retro](https://github.com/z2k-retro) · see [the appendices](README.md) for data, formats and procedures
 
 ## Purpose and status
 
-This reference records what a real Aureal Vortex 2 card does at the register level, so that anyone can build an emulated card or a replacement driver without starting from scratch. The [86Box device](using-86box.md) was built from it. The headline finding: **Aureal's own Windows driver computes the HRTF filters and sends finished coefficients to the chip**, so an emulator needs to run fixed filters, not reproduce Aureal's 3D math.
+This is a reverse-engineering reference. Aureal never published register-level documentation for the Vortex 2, and nothing here comes from its source code or internal documents. It records what a real card was observed to do, so that anyone can build an emulated card or a replacement driver without starting from scratch. The [86Box device](using-86box.md) was built from it. The headline finding: **Aureal's own Windows driver computes the HRTF filters and sends finished coefficients to the chip**, so an emulator needs to run fixed filters, not reproduce Aureal's 3D math.
+
+Most of the chip's signal path is now known as arithmetic, checked against the card: the A3D engine, the crosstalk canceller, the mixer, the sample-rate converters, and the wavetable voices' interpolation, gain codes and filter. None of it is bit-exact: the chip computes in fixed point with its own rounding, which has not been recovered, and the model uses floating point. Some scales are still assumed (the wavetable pan and effect sends) and some blocks are untouched (recording, the game port, S/PDIF); the open questions at the end list them.
 
 Evidence comes from one card, observed through the stock Windows 98 driver:
 
@@ -15,10 +17,13 @@ Evidence comes from one card, observed through the stock Windows 98 driver:
 | Host | ASUS Sabertooth X79 (BIOS 4701), card in the chipset's legacy PCI slot |
 | Capture | QEMU 11.1.2 with VFIO passthrough, every register access logged; card output recorded through the host line-in |
 
+Later sections also draw on an independent reverse engineer's register map of the chip and on descriptions from Aureal that its author relayed. They were used as leads: where the card could confirm or contradict them it was asked, and where a statement rests on them alone the text says so.
+
 Each finding is tagged by how well it is established:
 
 - **Confirmed**: seen directly and consistent across traces, snapshots or recorded audio.
 - **Strong**: one clear line of evidence, not yet tested independently.
+- **Plausible**: fits what is known, but the evidence is thin or indirect.
 - **Hypothesis**: a reading that fits the data but needs a targeted test.
 
 Register names marked "(ALSA)" come from the Linux `au88x0` driver; everything else is from our own observations. Session names (for example `20261031-142309-a3dtest2`) and "run" numbers refer to the measurement sessions listed at the end; the procedures are in [Appendix C](appendix-c-workflow.md).
@@ -431,7 +436,7 @@ Doppler is applied here: during A3D play the moving source's converter is rewrit
 - **Transition band.** The same kernel gives the noise figures above to 0.5 dB.
 - **Images.** In run 16 a 1 kHz tone at 22.05 kHz showed no image at 21.05 kHz down to −106 dB (the recording chain is 7.5 dB down there). The Blackman kernel puts it at −102 dB; the Kaiser one at −87 dB, which would have stood 20 dB clear of the noise.
 
-The same recording fixes the ratio word: the tone and its faint images at 2.9 and 4.9 kHz (−95 and −100 dB, the size 14- or 15-bit coefficients would leave) put the conversion ratio at 0.459350, and `CONVRATIO` was `0x1d66`, which is 0.459351 as a Q14 fraction. So 22.05 kHz material plays 53 ppm slow, and `SetFrequency` is applied by the driver as a ten-step glide of this word. Whether the chip normalises each phase's taps or interpolates between stored phases is not known; the model computes the taps directly (Strong).
+The same recording fixes the ratio word: the tone and its faint images at 2.9 and 4.9 kHz (−95 and −100 dB, the size 14- or 15-bit coefficients would leave) put the conversion ratio at 0.459350, and `CONVRATIO` was `0x1d66`, which is 0.459351 as a Q14 fraction. So 22.05 kHz material plays 53 ppm slow, and `SetFrequency` is applied by the driver as a ten-step glide of this word. Whether the chip normalises each phase's taps or interpolates between stored phases is not known; the model computes the taps directly (Strong). The map's author describes the converter as a 27-point Kaiser-windowed sinc. That agrees with the measurement: a Kaiser window with its parameter left free fits the impulse responses exactly as well as the Blackman window does (0.0039 against 0.0040), because the two curves are nearly the same there; the data cannot say which formula Aureal used to fill the table. He also expects the chip's conversions to be table driven, which would make the tables themselves readable with crafted inputs.
 
 **Levels and headroom (Confirmed, run 12).** Output level is linear (full, half and one-tenth scale tones measured 1 : 0.499 : 0.100), the converter has unity gain (a half-scale tone at 22.05 kHz matched 48 kHz within 0.04 dB), and an A3D native source and a 3D source straight ahead at the minimum distance in headphone mode both play at the source's own level. Summing half-scale tones of different pitches showed that the output saturates at digital full scale: two tones (peaks reaching full scale) stayed clean, three left distortion products 29 dB below the signal with the peaks held at full scale, and four 15 dB below. The output does not wrap around.
 
@@ -499,7 +504,7 @@ Starting a voice: the driver clears the voice's 64-word FIFO (`0x10000` + global
 
   **Gain codes, input gain and pan (Confirmed, run 19b).** The same run stepped the other fields under the same noise. Gain bytes `0xce`, `0xc8`, `0xc0`, `0xbf`, `0xb8` and `0xb0` gave 0.970, 0.766, 0.502, 0.501, 0.383 and 0.251 of the level at `0xcf`; the expansion with the mantissa repeated gives 0.967, 0.767, 0.500, 0.500, 0.383 and 0.250. The filter input gain (`PARM3` bits 31–24) uses the same code and acts ahead of the filter: `0xbf` and `0xaf` gave exactly 0.501 and 0.250 at every frequency, with the filter open or closed. The pan field does nothing to a voice that feeds an A3D source (`0x00`, `0x20` and `0x7f` all within 0.03 dB).
 
-**Interpolation (Confirmed, run 18).** A wavetable voice playing away from 48 kHz interpolates with the cubic Lagrange polynomial through four input samples (Aureal documents "4 point interpolation"). Run 18 forced a 3D tone onto a wavetable voice by occupying the ADB channels with twelve silent sources first: the tone took second-half voice 5, at rate words `0x4aaa` (8 kHz), `0x5acc` (11.025), `0x7acc` (22.05), `0x8aaa` (32) and `0x9acc` (44.1 kHz). Each tone was 0.2 × the rate, so the interpolator's images fell in band. Simulating each candidate end to end at 48 kHz (images fold onto one another there) and correcting for the front HRTF, the 46 measurable lines matched cubic Lagrange with a median error of 2.2 dB (2.2 dB rms over the 22 lines at 11.025 kHz). Catmull-Rom, which the model used before, was off by a median 7.4 dB and up to 20 dB; linear and cubic B-spline interpolation are far off (13.7 and 22.5 dB). Two things do not fit any 4-point kernel and are not explained: at 8 kHz three images are 6–10 dB below Lagrange, and at 44.1 kHz the image at 16.62 kHz (twice the rate less the tone) is 40 dB below it. The emulator uses cubic Lagrange.
+**Interpolation (Confirmed, run 18).** A wavetable voice playing away from 48 kHz interpolates with the cubic Lagrange polynomial through four input samples (Aureal documents "4 point interpolation"). Run 18 forced a 3D tone onto a wavetable voice by occupying the ADB channels with twelve silent sources first: the tone took second-half voice 5, at rate words `0x4aaa` (8 kHz), `0x5acc` (11.025), `0x7acc` (22.05), `0x8aaa` (32) and `0x9acc` (44.1 kHz). Each tone was 0.2 × the rate, so the interpolator's images fell in band. Simulating each candidate end to end at 48 kHz (images fold onto one another there) and correcting for the front HRTF, the 46 measurable lines matched cubic Lagrange with a median error of 2.2 dB (2.2 dB rms over the 22 lines at 11.025 kHz). Catmull-Rom, which the model used before, was off by a median 7.4 dB and up to 20 dB; linear and cubic B-spline interpolation are far off (13.7 and 22.5 dB). Two things do not fit any 4-point kernel and are not explained: at 8 kHz three images are 6–10 dB below Lagrange, and at 44.1 kHz the image at 16.62 kHz (twice the rate less the tone) is 40 dB below it. The emulator uses cubic Lagrange. (The map's author recalls a "4-point linear interpolation". Straight-line interpolation between two samples does not fit, at 13.7 dB; a cubic through four points is linear in the samples, which may be what is meant.)
 
 **Pan of a native A3D source (Confirmed, run 18).** `SetPanValues` on a native (2D) A3D source is done with mixer input gains, not the voice's pan field, and is linear: per-channel values 1, 0.5, 0.25 and 0 became `0x08`, `0x00`, `0xf8` and `0x80`, and the recorded levels were 1, 0.500, 0.250 and silence. The driver walks the gain to each new value in steps of about 7 ms. The voice pan field's own law is still unmeasured.
 
@@ -635,12 +640,13 @@ The major gaps, roughly in order of what an emulator needs first:
 
 - [ ] **Timer and interrupts**: the timer (N samples, one-shot), master clock (12.288 MHz), DMA page ring and timer interrupt bit are now known. Still open: `IRQ_SOURCE` bits 14 and 2, and how the chip behaves if the driver services an interrupt late.
 - [x] **The routing graph** the Windows driver builds for WAV and A3D playback (see Routing). Still to capture: recording, S/PDIF and DOS modes.
-- [ ] **Sample-rate converter internals**: `CONVRATIO`, Doppler, pitch and DMA format codes are decoded, and the filter response is measured (run 12). The `U0–U3` and drift words are not decoded, and conversion from input rates above 48 kHz is untested.
+- [ ] **Sample-rate converter internals**: `CONVRATIO`, Doppler, pitch and DMA format codes are decoded, and the 27-point filter was read from the card's impulse responses (runs 12 and 16). The `U0–U3` and drift words are not decoded, the coefficient table's word length is unknown, and conversion from input rates above 48 kHz is untested.
 - [x] **A3D arithmetic**: done (test-suite runs 1–4, the glidewatch readback and run 12). Gain and taps are Q15 at unity scale, ITD is in 1/512-sample units, and the atmospheric filter is a double real pole. The direction table (15° × 15°) is captured, and the driver interpolates it bilinearly in azimuth and elevation: 351 positions on a 3.75° grid in three regions matched bilinear interpolation of the table to within 0.05% (rounding), against 7–16% for nearest-point or one-axis schemes. Glides step every 64 samples with time constants 2²¹ / TC (gain, filter, HRTF) and 2¹⁹ / TC (ITD).
-- [ ] **Wavetable engine**: the PARM0/PARM1 rate, gain and filter bytes are decoded (see Wavetable voices in a game). Still open: PARM3, the per-voice words at `0x8080`/`0x8180`, `0x8008`, the voice output routing, and what decides which sounds the driver puts on wavetable voices.
+- [ ] **Wavetable engine**: the voice words are decoded and the interpolation, gain codes and four-stage filter are measured (runs 18 and 19). Still open: the feedback (resonance) word, whose effect is measured but not decoded; the pan law and send scales; the attack and mute ramps; and what decides which sounds the driver puts on wavetable voices.
 - [x] **Crosstalk canceller**: arithmetic decoded and confirmed against a real card for all three presets, level and delay included (Appendix B). Not bit-exact: the chip's fixed-point rounding and error feedback are not reproduced, and the enable bit is ignored.
 - [x] **True power-on state**: read after a full power-off (2026-10-30); memory regions power up random, fixed patterns and control registers as listed under Address map.
 - [ ] **Legacy DOS support**: Sound Blaster in a DOS window is software emulation by the Windows driver over the normal playback path (see DirectSound buffers and the mixer). MIDI through the "Wavetable" device is host software synthesis (run 12). Still open: real-mode DOS, the MPU-401 device, the game port, and what BAR2 is for.
+- [ ] **Bit accuracy**: the chip's fixed-point word lengths, rounding and saturation in each block, and its internal tables (the converter's coefficients, the expansion of gain codes), have not been recovered. They could be read out with crafted inputs and register settings. A factor of 0.75 in the 3D path's level is measured but not located.
 - [ ] **Coverage**: other driver versions (such as 2041), Windows 2000 and XP drivers, A3D 1.0 titles, two-channel boards (SQ1500, Montego II), S/PDIF and the SQ3500 DSP daughterboard.
 
 ## References and data
@@ -665,7 +671,7 @@ The major gaps, roughly in order of what an emulator needs first:
 | `tools/sbtest/` | Minimal Sound Blaster test for a DOS window |
 | `tools/v2replay.c`, `core/` | The chip model and a trace replayer |
 | `tools/hrtf_extract.py`, `tools/make_mhr.py` | Read the driver's direction table out of a traced run; turn it into an OpenAL Soft HRTF set |
-| `data/xtalk/` | Crosstalk-canceller model |
+| `data/xtalk/` | The crosstalk canceller's arithmetic and presets |
 
 **Measurement sessions**
 
@@ -690,3 +696,6 @@ The traces and recordings themselves are not in the repository (they are large a
 | 20261101-165822-glide | Glide readback: target changes from the host with the current registers polled every 100 µs |
 | 20261101-175550-sbpro | Sound Blaster test program in a DOS window |
 | 20261101-185801-run12 | Run 12: converter response, levels and headroom, MIDI, bilinear direction grid |
+| Runs 13–16, 2026-11-02 to 11-09 | Reflection gain and filter steps (run 14), DirectSound buffers held for host-side routing tests (runs 15 and 16), volume, pan and frequency steps |
+| 20261115-102619-run18-2 | Run 18: tones on a wavetable voice at five rates (the 4-point interpolation); a panned native tone |
+| 20261115-105709-run19, 20261115-111153-run19b | Run 19: noise on a wavetable voice while the host stepped its filter cut-off, feedback, input gain, gain and pan words |

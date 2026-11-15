@@ -2,6 +2,8 @@
 
 The [`vortex2` branch of z2k-retro/86Box](https://github.com/z2k-retro/86Box/tree/vortex2) adds an emulated **Aureal Vortex 2 (SQ2500)** PCI sound card with hardware A3D 2.0. It runs Aureal's own Windows 98 drivers, so games get the same positional audio, reflections and speaker processing as on the real card.
 
+**This is a reverse-engineered device.** Aureal never documented the chip. The emulation was built by tracing and measuring a real SQ2500, and checked against it: the 3D engine, the speaker crosstalk canceller, the mixer, the sample-rate converters and the wavetable voices run arithmetic that was decoded from the card and matches its recorded output, typically within a decibel. It is not bit-exact, and a few parts are still estimates. If something sounds different from a real card, that is worth [reporting](#reporting-a-problem). The [technical reference](reference.md) has the details.
+
 ## Download
 
 Windows builds are on the [releases page](https://github.com/z2k-retro/86Box/releases) under the `vortex-` tags. The zips are named `86Box-PowerVR…` because the branch also carries the PowerVR PCX2 emulation; both devices are in every build. To build it yourself, check out the `vortex2` branch and follow 86Box's usual build instructions.
@@ -29,7 +31,7 @@ Windows builds are on the [releases page](https://github.com/z2k-retro/86Box/rel
 - The speaker crosstalk canceller for headphones, satellites and monitors, and the hardware EQ.
 - The wavetable voices the driver uses for reflections and extra sounds.
 - MIDI through the "Vortex AU8830 Wavetable" device. This is Aureal's software synthesiser running in the driver, so it sounds exactly as on the real card.
-- CD audio. On the SQ2500 the drive's analog cable feeds the codec, and the driver records it and mixes it digitally, so game soundtracks on audio CD tracks play, and the Windows CD volume control works as on a real card. In 86Box, put the game CD (a BIN/CUE with its audio tracks) in the emulated CD-ROM drive.
+- CD audio. On the SQ2500 the drive's analog cable feeds the codec, and the driver records it and mixes it digitally, so game soundtracks on audio CD tracks play, and the Windows CD volume control works as on a real card. In 86Box, put the game CD (a BIN/CUE with its audio tracks) in the emulated CD-ROM drive. Mount it before starting the game: Half-Life, for one, only plays its CD music if the disc is in the drive when the game starts.
 - Sound Blaster Pro emulation in Windows DOS boxes, which Aureal's driver also does in software.
 
 ## Known limitations

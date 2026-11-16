@@ -372,22 +372,32 @@ For an emulator driven by the Windows driver, a pass-through is exact; the band 
 
 ### What the driver receives from the A3D library
 
-Aureal's A3D library does not send filters to the driver. According to the re-a3d-api reconstruction, it sends one 1,036-byte control record per sound (`A3DCTRL_SRC_SUPER`) through a DirectSound property set, and Aureal's driver turns that record into the register values documented above. The record holds:
+Aureal's A3D library does not send filters to the driver. It sends one 1,036-byte control record per sound through a DirectSound property set, and Aureal's driver turns that record into the register values documented above. The layout below was read from the debug build of `a3dapi.dll` in the A3D 3.0 SDK (`Drivers/Debug`, built from a tree called "Anzio 3.0"), which is unoptimised and names its classes and source files in its assertion text: from the routines that fill the record, and from the library's own software renderer, which consumes the same record. (An earlier version of this section took the field list from the re-a3d-api reconstruction; the two agree.)
 
-| Field | Contents | Likely register result |
+| Offset | Contents | Where it goes |
 | --- | --- | --- |
-| Per ear: `fAzim`, `fElev` | Direction of the sound for that ear | HRTF filter taps (`HrtfTarget`), looked up by the driver |
-| Per ear: `fGain` | Gain | `GainTarget` |
-| Per ear: `fDelay` | Delay | `ITDTarget` |
-| `fAlpha` | "Equalisation" | Atmospheric low-pass coefficients |
-| `fPitch`, `fFreqFactor` | Pitch and frequency factor | Sample-rate converter `CONVRATIO` (Doppler) |
-| `fMinDist`, `fMaxDist`, `fDistScale`, `fDistance` | Distance model | Folded into gain and `fAlpha` (Hypothesis) |
-| `Reflections[16]` | Per reflection: enable and mute flags, `fAlpha`, per-ear direction, gain and delay | Reflection rendering (wavetable voices) |
+| `0x04` | Mode: 1 = A3D (3D), 2 = native (2D) | 3D source or plain mixer path |
+| `0x0c` | Frequency factor: the source's pitch × Doppler (3D only) × a global factor | Converter ratio or wavetable rate |
+| `0x10` | High-frequency damping, 0 = none: 1 − (source EQ × global EQ × distance and occlusion factors in 3D), held between 0 and 0.99 | Atmospheric low-pass coefficients |
+| `0x14` | Pitch multiplier applied to the buffer's sample rate (1.0 as initialised) | Converter ratio |
+| `0x18` | 1.0 when the sound is not spatialised, else 0 | |
+| `0x1c`, `0x20`, `0x24`, `0x28` | Left ear: azimuth and elevation in radians, gain, delay in seconds | `HrtfTarget` (looked up by the driver), `GainTarget`, `ITDTarget` |
+| `0x2c`, `0x30`, `0x34`, `0x38` | Right ear: the same | |
+| `0x40` | Audibility: (left gain + right gain)/4 + (1 − damping)/2 | Resource manager's ranking |
+| `0x44` | Distance: the mean of the two ears' distances | |
+| `0x50` + 56 n | Sixteen reflection entries of 56 bytes, each starting with an enable flag | Reflection voices |
 
-The right-hand column is our inference from the traces; the field list is from the reconstruction. Two consequences:
+What the routines show beyond the layout:
 
-- **The HRTF tables live in Aureal's driver.** The library's own software renderer uses at most 50 taps, while the chip receives 56, so the driver has separate tables. An emulator that runs the original driver gets them for free; a wrapper that replaces the driver needs them.
-- **Reflection delay is a time per reflection, not a register.** On the DirectSound route the library builds reflections by duplicating the sound buffer and starting the copy later, which matches the buffer restarts seen when the delay slider moved.
+- **Each ear has its own direction.** The library computes azimuth, elevation and distance separately for the two ears and sends both.
+- **The interaural delay is split evenly:** left delay = −ITD/2, right delay = +ITD/2, both zero when the sound is not spatialised.
+- **Gain per ear** is that ear's gain × the source's gain × two further source factors × the global output gain; for a 2D sound it is the source gain × the pan value for that side × the output gain.
+- **A source closer than 0.071 m is treated as inside the head:** the left ear's direction is set to +π/2 and the right's to −π/2, elevation and delays to zero.
+- The record is kept in two copies and sent only when it differs from the one last sent.
+
+So **the HRTF tables live in Aureal's driver**: the library never handles filter taps for a hardware source. An emulator that runs the original driver gets them for free; a wrapper that replaces the driver needs them. And **reflection delay is a time per reflection, not a register**: on the DirectSound route the library builds reflections by duplicating the sound buffer and starting the copy later, which matches the buffer restarts seen when the delay slider moved.
+
+**The library's software renderer ("A2D") is not an HRTF renderer (Confirmed, same DLL).** It is what plays 3D sources the card has no channel for, and what cards without A3D get. It runs at 22.05 kHz and takes the same record. For each ear it looks the direction up in a built-in grid of 12 azimuths (30° apart) by 6 elevations (18° apart) plus two poles, 74 directions per ear with bilinear interpolation between the four nearest, and each grid point holds two 16-bit numbers: a level (about 0.2 to 1.0, highest toward that ear) and a filter amount that is zero on the near side and grows on the far side. With the two delays from the record that makes level difference, time difference and a one-coefficient head shadow, and nothing else: no pinna cues, no elevation or front-back colouring. It also multiplies each ear's gain by 1.5 before converting to 16 bits. That last figure may bear on the card: Aureal's map gives a one-bit right shift on the A3D outputs, and 1.5 × 0.5 is the 0.75 measured on the 3D path; where a 1.5 would sit in the driver's values is not known.
 
 Logging these records during a traced session would give the driver's input and output side by side, and with them the exact conversions from gain, delay and `fAlpha` to register values.
 
@@ -554,6 +564,10 @@ The emulator already carried every part of this (capture streams, the alias sink
 **The SDK's 3.0 samples in 86Box.** Each of Aureal's 3.0 sample programs was run with `ReverbEnable` set: reverb presets, EAX 1 reverb through property sets, volumetric sources, manual reflections, geometry reflections and occlusion all ran, on the same blocks and routes as 2.0 programs (reflections on wavetable voices, as before). Static and streamed WAV and MP3 sources play; MP3 is decoded by the library on the guest's processor. With the reverb on, Messiah starts the reverb loop as soon as a level loads and keeps it, with up to seven sources feeding it. None of this has been compared with a real card's output.
 
 **AC-3 is not supported.** A streamed AC-3 source crashed inside `a3dapi.dll` before any audio reached the card. The SQ2500 has no AC-3 hardware (that was the SQ3500's daughterboard), so the library falls back to a software decoder that its own sample says must be unlocked with a key licensed from Dolby, through DirectShow filters the driver package installs. Nothing here depends on the card, no such key is public, and no game is known to have used it; `tools/a3dtest/loadtest.c` tries it only when asked.
+
+**Reverb parameters.** `IA3dReverb` takes either a preset or a custom set. A preset is one of 26 environments, the EAX 1.0 list in the same order (generic, padded cell, room … psychotic), with a volume, decay time and damping: the EAX 1.0 listener properties. A custom set is the I3DL2 listener property list (room, room HF, roll-off, decay time, HF ratio, reflections and delay, reverb and delay, diffusion, density, HF reference) with I3DL2's ranges and defaults. The library passes each to the driver's matching property set.
+
+**"76 hardware 3D channels".** The A3D 2.0 platform guide credits the Vortex 2 with 76 hardware 3D channels, against 8 for the Vortex 1. The chip has 16 A3D sources; 76 is 16 plus 60, which suggests the driver also counts wavetable voices it can only pan (Hypothesis). That would fit Half-Life, whose sounds beyond the A3D sources play on wavetable voices panned with the two send levels. The same guide says reflections are re-ranked by audibility every 100 ms.
 
 The Miles Sound System provider shipped with Elite Force II (`Mssa3d.m3d`, 2003) asks only for the A3D 2.0 interfaces.
 

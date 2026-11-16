@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Look for the sample-rate converter's coefficient table in BAR0 dumps from 'vortex-poke.py dump'.
+"""Summarise and compare BAR0 dumps from 'vortex-poke.py dump'.
+
+The converter's coefficient table is not exposed in any register (the register map's author),
+so the filter-shape search below will not find it; it is kept for other tables.
 
   ./scan-dump.py A.bin [B.bin ...]
 

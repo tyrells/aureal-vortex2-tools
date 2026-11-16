@@ -25,6 +25,8 @@
  *           driver's only client, as in a game's DirectSound mode
  *   run18 = sync wttone: steady tones on a wavetable voice at each common rate (its 4-point
  *           interpolator) and a panned native tone (about 2 minutes)
+ *   run20 = sync wtpan: the wavetable send pair (Half-Life's panning; about 4 minutes;
+ *           run alongside vortex-poke.py wtsend on the host)
  *   wtnoise = steady noise on a wavetable voice for 200 s (for vortex-poke.py wtfilt)
  *   run15 = sync dsfill dshold eqhold dswt ds3d dsstream: DirectSound buffers on wavetable
  *           voices (where they land, levels, volume/pan/frequency, stereo, 8-bit, DS3D,
@@ -1582,6 +1584,98 @@ static void t_wtnoise(void) {
     logmsg("TEST wtnoise end");
 }
 
+/* wtpan: the wavetable send pair Half-Life pans with (run 20).
+   Half-Life's ordinary sounds play on second-half voices 4-29 with DSREG clear, so they
+   reach the mix through the reverb (36) and chorus (37) sends, and the driver writes the
+   two send fields per sound. The guess tested here: those are native (2D) A3D sources that
+   found every ADB channel busy, and the two send fields carry SetPanValues' left and right.
+   Part A: a native 1 kHz tone with nothing else playing (an ADB channel; mixer-gain pan,
+           known from run 18): the level reference.
+   Part B: 16 silent 3D sources (every ADB channel and second-half voices 0-3, run 11),
+           then the same native tone: pan pairs and gains, 3 s each.
+   Part C: 8 more silent native sources, then the tone again (in case B still found an ADB
+           channel): the extreme pans.
+   Part D: the tone at 48 kHz (rate word 0xa000, for the host to find), pan 1/1, held 150 s
+           for 'vortex-poke.py wtsend', which steps the voice's send and pan fields itself.
+   Headphones. About 4 minutes. */
+static void t_wtpan(void) {
+    static const float pans[][2] = { {1, 1}, {1, 0}, {0, 1}, {1, 0.75f}, {0.75f, 1}, {1, 0.5f}, {0.5f, 1},
+                                     {1, 0.25f}, {0.25f, 1}, {1, 0.1f}, {0.1f, 1}, {0.5f, 0.5f}, {0.25f, 0.25f} };
+    static const float gains[] = { 0.5f, 0.25f, 1.0f };
+    SRC all[26]; int i, n = 0, nb;
+    logmsg("TEST wtpan begin (headphones; native 1 kHz tone: alone, over 16 silent 3D sources, over 24; then 48 kHz held 150 s for vortex-poke.py wtsend)");
+    headphones();
+    memset(all, 0, sizeof all);
+    g_tone_hz = 1000;
+#define PANSTEP(k) do { A3DVAL pv[2]; pv[0] = (A3DVAL)pans[k][0]; pv[1] = (A3DVAL)pans[k][1]; \
+        IA3dSource_SetPanValues(all[25].src, 2, pv); \
+        L_begin(); L_s("STEP wtpan n="); L_i(n++); L_s(" part="); L_s(part); L_s(" what=pan"); \
+        L_kv("pan_l", pans[k][0], 2); L_kv("pan_r", pans[k][1], 2); L_end(); hold(all, 26, 3000); } while (0)
+    {   const char *part = "A";
+        all[25].src = new_source(1, STIM_TONEF, 22050, 1, 16, 1.0);
+        if (all[25].src) {
+            IA3dSource_Play(all[25].src, A3D_LOOPED);
+            for (i = 0; i < 3; i++) PANSTEP(i);
+            kill_source(&all[25]);
+        }
+        hold(all, 26, 500);
+    }
+    for (nb = 0; nb < 16; nb++) {                    /* the 3D bed */
+        all[nb].src = new_source(0, STIM_SILENCE, 22050, 1, 16, 1.0);
+        if (!all[nb].src) break;
+        place(&all[nb], nb * 22.5 + 11.25, 0, 2.0);
+        IA3dSource_Play(all[nb].src, A3D_LOOPED);
+        hold(all, 26, 250);
+    }
+    L_begin(); L_s("STEP wtpan n="); L_i(n++); L_s(" part=B what=bed3d count="); L_i(nb); L_end();
+    hold(all, 26, 1000);
+    {   const char *part = "B";
+        all[25].src = new_source(1, STIM_TONEF, 22050, 1, 16, 1.0);
+        if (all[25].src) {
+            IA3dSource_Play(all[25].src, A3D_LOOPED);
+            for (i = 0; i < 13; i++) PANSTEP(i);
+            for (i = 0; i < 3; i++) {
+                IA3dSource_SetGain(all[25].src, (A3DVAL)gains[i]);
+                L_begin(); L_s("STEP wtpan n="); L_i(n++); L_s(" part=B what=gain"); L_kv("gain", gains[i], 2); L_end();
+                hold(all, 26, 3000);
+            }
+            kill_source(&all[25]);
+        }
+        hold(all, 26, 500);
+    }
+    for (i = 16; i < 24; i++) {                      /* 8 more, native */
+        all[i].src = new_source(1, STIM_SILENCE, 22050, 1, 16, 1.0);
+        if (!all[i].src) break;
+        IA3dSource_Play(all[i].src, A3D_LOOPED);
+        hold(all, 26, 250);
+    }
+    L_begin(); L_s("STEP wtpan n="); L_i(n++); L_s(" part=C what=bed2d count="); L_i(i - 16); L_end();
+    hold(all, 26, 1000);
+    {   const char *part = "C";
+        all[25].src = new_source(1, STIM_TONEF, 22050, 1, 16, 1.0);
+        if (all[25].src) {
+            IA3dSource_Play(all[25].src, A3D_LOOPED);
+            for (i = 0; i < 3; i++) PANSTEP(i);
+            PANSTEP(5); PANSTEP(6);
+            kill_source(&all[25]);
+        }
+        hold(all, 26, 500);
+    }
+    {   const char *part = "D";
+        all[25].src = new_source(1, STIM_TONEF, 48000, 1, 16, 1.0);
+        if (all[25].src) {
+            IA3dSource_Play(all[25].src, A3D_LOOPED);
+            PANSTEP(0);
+            L_begin(); L_s("STEP wtpan n="); L_i(n++); L_s(" part=D what=hold for wtsend"); L_end();
+            hold(all, 26, 150000);
+            kill_source(&all[25]);
+        }
+    }
+#undef PANSTEP
+    for (i = 0; i < 26; i++) kill_source(&all[i]);
+    logmsg("TEST wtpan end");
+}
+
 /* ------------------------------------------------------------------ main */
 typedef void (*TESTFN)(void);
 static const struct { const char *name; TESTFN fn; } tests[] = {
@@ -1592,7 +1686,7 @@ static const struct { const char *name; TESTFN fn; } tests[] = {
     {"multi", t_multi}, {"dsound", t_dsound}, {"elev5", t_elev5}, {"tcsweep", t_tcsweep}, {"click90", t_click90}, {"noise2d", t_noise2d}, {"wtpath", t_wtpath},
     {"srcresp", t_srcresp}, {"midi", t_midi}, {"level", t_level}, {"hrtfgrid", t_hrtfgrid}, {"reflhf", t_reflhf},
     {"dsfill", t_dsfill}, {"dshold", t_dshold}, {"eqhold", t_eqhold}, {"dswt", t_dswt}, {"ds3d", t_ds3d}, {"dsstream", t_dsstream},
-    {"dssync", t_dssync}, {"wttone", t_wttone}, {"wtnoise", t_wtnoise},
+    {"dssync", t_dssync}, {"wttone", t_wttone}, {"wtnoise", t_wtnoise}, {"wtpan", t_wtpan},
 };
 static int g_noa3d;     /* run16: A3D is never opened, so DirectSound is the driver's only client */
 /* default (no arguments): the run-2 suite */
@@ -1665,6 +1759,7 @@ void entry(void) {
         else if (seq(tok, "run15")) { t_sync(); t_dsfill(); t_dshold(); t_eqhold(); t_dswt(); t_ds3d(); t_dsstream(); }
         else if (seq(tok, "run16")) { t_dssync(); t_dsfill(); t_dshold(); t_eqhold(); t_dswt(); t_ds3d(); t_dsstream(); }
         else if (seq(tok, "run18")) { t_sync(); t_wttone(); }
+        else if (seq(tok, "run20")) { t_sync(); t_wtpan(); }
         else if (seq(tok, "run12")) { t_sync(); t_srcresp(); t_level(); t_midi(); t_hrtfgrid(); }
         else run_named(tok);
         ran = 1;

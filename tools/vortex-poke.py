@@ -32,6 +32,10 @@ timestamp (the same clock as qemu-trace.log) for alignment.
                                                  filter cut-off, feedback, input gain, gain and pan words
                                                  under steady noise, 2.5 s per step (about 2.5 minutes;
                                                  --rest skips the cut-off sweep, about 1 minute)
+  sudo ./vortex-poke.py dump FILE.bin              read every word of BAR0 (0x00000-0x3ffff) into FILE.bin,
+                                                 little-endian, skipping 0x2919c (a read acknowledges the
+                                                 timer); for scan-dump.py. Meant for a guest at the Windows 98
+                                                 boot menu or a plain DOS prompt, before any driver runs
   sudo ./vortex-poke.py wtsend [--log FILE] [--hold SECS]
                                                  run alongside 'A3DTEST run20' (wtpan): finds the native
                                                  48 kHz tone on a second-half voice with DSREG clear (the
@@ -118,6 +122,15 @@ def main():
         check_addr(a)
         old = bar.rd(a); bar.wr(a, v); new = bar.rd(a)
         print(json.dumps({'utc': utc(), 'addr': hex(a), 'old': hex(old), 'wrote': hex(v), 'readback': hex(new)}))
+        return
+    if cmd == 'dump':
+        import struct
+        out = sys.argv[2]
+        skip = {0x2919c}
+        words = [0 if a in skip else bar.rd(a) for a in range(0, SIZE, 4)]
+        with open(out, 'wb') as f:
+            f.write(struct.pack(f'<{len(words)}I', *words))
+        print(json.dumps({'utc': utc(), 'dump': out, 'bytes': 4 * len(words), 'skipped': [hex(a) for a in sorted(skip)]}))
         return
     if cmd == 'watch':                      # quick check that host reads see the guest's writes
         try:

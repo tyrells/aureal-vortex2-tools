@@ -551,6 +551,10 @@ Reverb is the one feature with a path of its own, and it is **off as installed**
 
 The emulator already carried every part of this (capture streams, the alias sinks, the canceller's fifth pair): with the value set, the sample reports "Playing with reverb" and the replayed output decorrelates and rises about 2 dB while the reverb is bound. Since the reverb itself is the driver's code running on the guest's processor, the card's part is only the loop. Not yet compared with a real card, including whether `ReverbEnable` is 0 on a real installation.
 
+**The SDK's 3.0 samples in 86Box.** Each of Aureal's 3.0 sample programs was run with `ReverbEnable` set: reverb presets, EAX 1 reverb through property sets, volumetric sources, manual reflections, geometry reflections and occlusion all ran, on the same blocks and routes as 2.0 programs (reflections on wavetable voices, as before). Static and streamed WAV and MP3 sources play; MP3 is decoded by the library on the guest's processor. With the reverb on, Messiah starts the reverb loop as soon as a level loads and keeps it, with up to seven sources feeding it. None of this has been compared with a real card's output.
+
+**AC-3 is not supported.** A streamed AC-3 source crashed inside `a3dapi.dll` before any audio reached the card. The SQ2500 has no AC-3 hardware (that was the SQ3500's daughterboard), so the library falls back to a software decoder that its own sample says must be unlocked with a key licensed from Dolby, through DirectShow filters the driver package installs. Nothing here depends on the card, no such key is public, and no game is known to have used it; `tools/a3dtest/loadtest.c` tries it only when asked.
+
 The Miles Sound System provider shipped with Elite Force II (`Mssa3d.m3d`, 2003) asks only for the A3D 2.0 interfaces.
 
 ### Game note: SiN's dropped dialogue and its "reverb engine" (Strong)

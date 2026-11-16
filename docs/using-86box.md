@@ -38,6 +38,8 @@ Windows builds are on the [releases page](https://github.com/z2k-retro/86Box/rel
 
 A3D 3.0 games work with the 4.06.2048 driver; they use the same card features as A3D 2.0 games. The driver's reverb, which A3D 3.0 and EAX 1.0 games use, is switched off as installed. To turn it on, set `ReverbEnable` to 1 under `HKEY_LOCAL_MACHINE\Software\Aureal\Vortex\AU8830\ControlPanel` in the guest's registry and restart Windows. The reverb is computed by the driver on the emulated processor, so it costs guest CPU time.
 
+AC-3 sound in A3D 3.0 is not supported: on this card it needs a Dolby-licensed software decoder that was never public, and Aureal's library crashes without it. MP3 and WAV streaming work.
+
 ## Known limitations
 
 - **Sound Blaster emulation can freeze the machine at boot.** It reserves IRQ 5, DMA 1 and port 220h, and Windows will not let you change them. If Windows has put a PCI device on IRQ 5 (on the ASUS P2B-LS it was the USB controller), the machine can hang right after the startup sound. Disable "Vortex AU8830 Sound Blaster Pro Emulation" in Device Manager, or move the other device off IRQ 5. A real SQ2500 behaves the same way. For DOS games an emulated Sound Blaster 16 is the better choice anyway: the Vortex's Sound Blaster support only reaches SB Pro and only works inside Windows.

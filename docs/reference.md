@@ -539,6 +539,20 @@ An earlier model treated a set `DSREG` bit as "own source only", which silenced 
 
 **Which buffers get wavetable voices (Confirmed, runs 15 and 16).** With A3D open (the test program's default), DirectSound gets four hardware buffers, on ADB channels 3–6; every further buffer is mixed in software into channel 0. With A3D closed, as in a game's DirectSound mode, hardware buffers take ADB channels 1–14 and then first-half wavetable voices; 40 buffers all got hardware. DirectSound 3D buffers start on an ADB channel the same way.
 
+### A3D 3.0 and the driver's reverb (Strong, 86Box sessions of 2026-11-16)
+
+A3D 3.0 is `a3dapi.dll` 3.x (3.12 ships with the Messiah demo) over the same driver; the 4.06.2048 driver is the first to list A3D 3.0, EAX 1.0 and I3DL2 support and a host reverb engine ("A3Dverb"). At the card, a 3.0 program looks like a 2.0 one. Messiah (whose executable carries the `IA3d5`, `IA3dSource2` and `IA3dReverb` interface IDs) and Elite Force wrote to no register block and used no kind of route that Half-Life does not. Aureal's SDK sample for volumetric sources drives the ordinary A3D source parameters and nothing else.
+
+Reverb is the one feature with a path of its own, and it is **off as installed**. The library asks the driver's sound buffer for the EAX 1 and I3DL2 property sets when it starts; if the driver supports neither, `IA3d5::BindReverb` fails (the SDK's `reverb` sample stops with "Failed to bind reverb to A3D"). The driver answers from one registry value, `HKLM\Software\Aureal\Vortex\AU8830\ControlPanel\ReverbEnable`, which the installer writes as 0 (beside it: `ReverbOnAll` 1, `ActiveReverbLevel` 3, a quality level of 0–4). Set to 1, with a restart, the sample binds its reverb and the driver builds a loop through the host:
+
+- the dry source's converter output goes to its A3D source as before and also to a mixer input (`0x69` in this run) on mixers 10 and 11;
+- those two mixers feed two converters, which feed capture channel 2 and its alias (sinks `0x02` and `0x22`: a stereo capture stream);
+- the driver computes the reverb on the host and plays it on a stereo stream (channel 3) through two more converters into the canceller's fifth input pair (sinks `0x9a` and `0x9f`), so the wet signal joins the output beside the 3D sources without passing through the A3D engine.
+
+The emulator already carried every part of this (capture streams, the alias sinks, the canceller's fifth pair): with the value set, the sample reports "Playing with reverb" and the replayed output decorrelates and rises about 2 dB while the reverb is bound. Since the reverb itself is the driver's code running on the guest's processor, the card's part is only the loop. Not yet compared with a real card, including whether `ReverbEnable` is 0 on a real installation.
+
+The Miles Sound System provider shipped with Elite Force II (`Mssa3d.m3d`, 2003) asks only for the A3D 2.0 interfaces.
+
 ### Game note: SiN's dropped dialogue and its "reverb engine" (Strong)
 
 SiN with 3D audio on and its reverb engine off drops about every other line of dialogue in the opening cutscene, and cuts other sounds short. Traces of the same scene on the real card (X79 session `20261108-235104-sin-opening2`, SiN 1.00) and in 86Box show the same thing: the game starts and stops its sounds in the same order with the same timing on both, and for the missing lines it never starts a stream at all. During those gaps only the main 2D stream was running; ten or more ADB channels were idle. So the card did not run out of voices, and the emulator matches the hardware. The fault is in the game.

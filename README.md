@@ -1,8 +1,8 @@
 # aureal-vortex2-tools
 
-A **reverse-engineering project** for the **Aureal Vortex 2** (AU8830), the sound chip on the Aureal SQ2500 and other A3D 2.0 cards (1998). Aureal went out of business in 2000 and never published how the chip works. This repository holds what has been worked out since, from the outside: a register-level reference, the data and tools behind it, and a model of the chip. The model is the Vortex 2 device in [86Box](https://86box.net), developed on the [`vortex2` branch of z2k-retro/86Box](https://github.com/z2k-retro/86Box/tree/vortex2).
+A **reverse-engineering project** for the **Aureal Vortex 2** (AU8830), the sound chip on the Aureal SQ2500 and other A3D 2.0 cards (1998). Aureal went out of business in 2000 and never published how the chip works. This repository holds what has been worked out since, from the outside: a register-level reference, the data and tools behind it, and a model of the chip. The model is the Vortex 2 device in [86Box](https://86box.net), developed on the [`vortex2` branch of z2k-retro/86Box](https://github.com/z2k-retro/86Box/tree/vortex2). A companion project, [A3D on DSOAL](https://github.com/z2k-retro/dsoal/tree/a3d), uses what was learned here to run A3D games on modern Windows without an emulator.
 
-**Just want to try it?** See [Using the Vortex 2 emulation in 86Box](docs/using-86box.md).
+**Just want to try it?** See [Using the Vortex 2 emulation in 86Box](docs/using-86box.md), or [A3D on DSOAL](https://github.com/z2k-retro/dsoal/tree/a3d) for games on a current Windows PC.
 
 ## How it was done
 
@@ -12,8 +12,9 @@ Nothing here comes from Aureal's source code or internal documents. The method i
 2. **Drive it one setting at a time.** A test program steps the A3D and DirectSound APIs through single changes, so each register field can be tied to what it does to the sound.
 3. **Write to the chip directly.** Host-side scripts change registers under a playing sound (filters, gains, the canceller's coefficients) and the recording shows the arithmetic.
 4. **Replay and compare.** Each trace is replayed into the model, which must return what the card returned and produce what the card produced.
+5. **Compare with period machines.** PCs of the time with the same card were recorded playing the same game as the emulator.
 
-The Linux ALSA `au88x0` driver supplied most register names. An independent reverse engineer's private register map of the chip, and descriptions from Aureal that its author relayed, pointed to several number formats and structures; each was then checked against the card, and the reference says where a statement rests on that alone.
+The Linux ALSA `au88x0` driver supplied most register names. Aureal's archived A3D SDKs, in particular the debug build of the 3.0 library with its assertion text, showed what the library sends the driver. An independent reverse engineer's private register map of the chip, and descriptions from Aureal that its author relayed, pointed to several number formats and structures; each was then checked against the card, and the reference says where a statement rests on that alone.
 
 The central finding: Aureal's Windows driver computes the HRTF filters, reflections and MIDI synthesis on the host and sends finished results to the chip. An emulator that runs the original driver therefore needs the chip's fixed signal path, not Aureal's 3D algorithms.
 
@@ -26,7 +27,9 @@ The central finding: Aureal's Windows driver computes the HRTF filters, reflecti
 | Crosstalk canceller (speaker modes) | Arithmetic decoded; matches the card's three presets to 0.2–0.6 dB with nothing fitted |
 | Mixer | Gain law and pipeline from Aureal's description, confirmed on the card where measured |
 | Sample-rate converters | 27-point filter read from the card's impulse responses |
-| Wavetable voices | Interpolation, gain codes and the four-stage filter measured directly; pan and send scales assumed |
+| Wavetable voices | Rate words, interpolation, gain codes and the four-stage filter measured directly; pan and send scales assumed |
+| A3D 3.0 | Needs nothing new from the chip; the driver's reverb is a host loop through capture, which runs in the emulator (off by default in the driver, as on the card) |
+| Against period PCs | Half-Life on an Athlon XP and a Pentium III with the card: level and tone within about 1 dB in headphone mode, the speaker-mode midrange within 0.5 dB, the CD balance within the recording's uncertainty |
 | Ten-band EQ | Runs from the registers; matches to about 0.4 dB |
 | Not bit-exact anywhere | The chip is fixed point with its own rounding; the model is floating point |
 | Not done | Recording, game port, MPU-401, real-mode DOS, S/PDIF, the filter's resonance, the SQ3500 daughterboard |
@@ -46,22 +49,22 @@ Every statement in the [reference](docs/reference.md) is tagged by how well it i
 | `tools/vortex_trace.py`, `tools/a3d_params.py`, `tools/a3d_slices.py` | Turn QEMU traces into register timelines and A3D parameters | No |
 | `tools/vortexprobe.py` | PCI identity, register snapshots (cold and running), decoding of routing, converters, DMA and codec | Yes |
 | `tools/vortex-poke.py` | Register reads, writes and sweeps from the host while the VM runs | Yes (VFIO) |
-| `tools/a3dtest/` | Windows 98 test program that drives the A3D and DirectSound APIs one setting at a time and logs each step | Yes |
+| `tools/a3dtest/` | Windows 98 test program that drives the A3D and DirectSound APIs one setting at a time and logs each step; `loadtest`, which tries each A3D 3.0 file type | Yes |
 | `tools/sbtest/` | Minimal Sound Blaster test for a DOS window | Yes |
 | `scripts/vortex-session.sh` | One command for a traced session: records the card's output and boots the Windows 98 VM with every register access logged | Yes (VFIO) |
 
 ## No card? You can still help
 
 - **Play games in the 86Box build** and report what sounds wrong, with the diagnostic log. The [user guide](docs/using-86box.md#reporting-a-problem) says what to include.
-- **Build an A3D wrapper that sounds like the card.** The [crosstalk canceller's arithmetic](docs/appendix-b-crosstalk-model.md) is here, and [Appendix A](docs/appendix-a-direction-table.md) describes the driver's direction table and how a card owner can read it out.
+- **Build an A3D wrapper that sounds like the card.** [A3D on DSOAL](https://github.com/z2k-retro/dsoal/tree/a3d) is one, using the card's direction table; it still uses OpenAL Soft's speaker processing, and the [crosstalk canceller's arithmetic](docs/appendix-b-crosstalk-model.md) is here for anyone who wants to add the card's. [Appendix A](docs/appendix-a-direction-table.md) describes the driver's direction table and how a card owner can read it out.
 - **Work on the model without hardware.** `core/` is plain C with a small host interface (`core/snd_vortex2_core.h`), and everything it models is described in the [reference](docs/README.md).
-- **Card owners**: the open questions at the end of the [reference](docs/reference.md#open-questions) list what is still unmeasured: recording, the game port and MPU-401, real-mode DOS, other driver versions and boards (SQ1500, Montego II, SQ3500), the wavetable filter's resonance, and the chip's exact fixed-point rounding. [Appendix C](docs/appendix-c-workflow.md) walks through every procedure.
+- **Card owners**: the open questions at the end of the [reference](docs/reference.md#open-questions) list what is still unmeasured: recording, the game port and MPU-401, real-mode DOS, other driver versions and boards (SQ1500, Montego II, SQ3500), the wavetable filter's resonance and pan law, A3D 3.0's reverb, and the chip's exact fixed-point rounding. A true stereo recording of a period PC playing a game, with the mixer settings noted, is useful even without tracing. [Appendix C](docs/appendix-c-workflow.md) walks through every procedure.
 
 ## Building
 
 ```sh
 make            # bin/v2replay
-make a3dtest    # tools/a3dtest/a3dtest.exe (MinGW cross compiler and the A3D 2.0 SDK header; see Appendix C)
+make a3dtest    # tools/a3dtest/a3dtest.exe, and loadtest.exe if the 3.0 header is found (MinGW cross compiler and the A3D SDK headers; see Appendix C)
 ```
 
 `v2replay` builds anywhere with a C99 compiler. The Python tools need Python 3 (and NumPy for the analysis); the card tools need root, an IOMMU, and the card bound to `vfio-pci`.

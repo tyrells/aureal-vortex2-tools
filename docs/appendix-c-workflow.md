@@ -105,11 +105,24 @@ The log's clock is the guest's and drifts slightly against the trace. Line steps
 | `multi` | Sixteen simultaneous sources (slot allocation) |
 | `srcresp`, `level`, `midi` | Converter filter response, levels and headroom, the MIDI synthesiser |
 | `reflhf` | Reflection tone and level against wall reflectance |
+| `wttone`, `wtnoise` | A tone or steady noise forced onto a second-half wavetable voice, by first occupying the ADB channels with twelve silent 3D sources: the voice's interpolation and rate words (`wttone`, run 18) and, with `vortex-poke.py wtfilt`, its filter, gain codes and pan (`wtnoise`, run 19) |
 | `dsfill`, `dshold`, `dswt`, `ds3d`, `dsstream`, `eqhold` | DirectSound buffers on wavetable voices: where 24 buffers land and whether each is heard; volume, pan, frequency, stereo and 8-bit on a voice against the same tone on an ADB channel; DirectSound 3D buffers; a streaming buffer; steady stimuli for `vortex-poke.py run15` (`DSREG` and EQ) |
 
 Suites: no arguments runs the run-2 set; `v1`, `run3`, `run12`, `run13` and `run15` run those sessions' sets; `all` runs everything. The comment at the top of `a3dtest.c` lists the exact contents.
 
+**A3D 3.0.** `a3dtest` drives the 2.0 interfaces only. For A3D 3.0, Aureal's own sample programs (in the 3.0 SDK's `sdk/bin`: `reverb`, `volsrc`, `ManualReflections`, `reflect`, `polygon`, `PropSets`, `loading`) can go on a CD image with their media and be run in a traced session; they wait for key presses, so leave a few seconds between steps to split the trace. `tools/a3dtest/loadtest.c` (built by `build.sh` when the 3.0 header is found, `SDK3_INC`) loads each of `loading`'s file types on its own and writes each step to `C:\LOADTEST.TXT` as it goes, since a failure can take Windows down; AC-3 only runs as `LOADTEST AC3`. The driver's reverb is off as installed: set `ReverbEnable` to 1 under `HKLM\Software\Aureal\Vortex\AU8830\ControlPanel` and restart before testing it.
+
 `tools/sbtest/sbtest.asm` is a small DOS program (assemble with `nasm -f bin sbtest.asm -o SBTEST.COM`) that resets the Sound Blaster DSP at 220h, reads its version, plays one second of 8-bit DMA on DMA 1 and waits for IRQ 5, printing each step. Real-mode DOS cannot be tested under QEMU passthrough, because QEMU does not forward legacy ISA ports to the card; in a Windows DOS window the driver's software emulation answers.
+
+## Recording a period machine
+
+A plain PC with the card, no tracing, gives the card's sound in the conditions players had, and is the reference to compare 86Box against by ear and by spectrum. Points learned from the Athlon XP and Pentium III recordings:
+
+- **Check that the recording is really stereo** before anything else: play a sound hard left (`A3DTEST` `azimuth`, or the Windows balance slider) and see that it lands on one channel. Both recordings came out mono through several cables and inputs, which rules out anything about the stereo image. The sum of the two outputs still gives level and tone.
+- **Photograph or note the Windows mixer** (Wave Out, Wavetable, CD-ROM) and the Aureal speaker setting. The CD level against game sound cannot be judged without them; matching them in the 86Box guest then makes the two directly comparable.
+- **Put the game disc in before starting the game**, for games that play CD music (Half-Life only looks for it at start-up), and connect the drive's analog cable to the card.
+- **Leave headroom**: a recording that touches full scale on explosions cannot show whether the card itself saturates.
+- Record the same stretch of play in both headphone and speaker modes if you can: the difference between the two is the canceller's, independent of the recording chain.
 
 ## Checking a model against a trace
 

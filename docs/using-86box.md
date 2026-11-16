@@ -1,8 +1,8 @@
 # Using the Vortex 2 emulation in 86Box
 
-The [`vortex2` branch of z2k-retro/86Box](https://github.com/z2k-retro/86Box/tree/vortex2) adds an emulated **Aureal Vortex 2 (SQ2500)** PCI sound card with hardware A3D 2.0. It runs Aureal's own Windows 98 drivers, so games get the same positional audio, reflections and speaker processing as on the real card.
+The [`vortex2` branch of z2k-retro/86Box](https://github.com/z2k-retro/86Box/tree/vortex2) adds an emulated **Aureal Vortex 2 (SQ2500)** PCI sound card with hardware A3D 2.0 (and A3D 3.0, which the driver builds on the same hardware). It runs Aureal's own Windows 98 drivers, so games get the same positional audio, reflections and speaker processing as on the real card.
 
-**This is a reverse-engineered device.** Aureal never documented the chip. The emulation was built by tracing and measuring a real SQ2500, and checked against it: the 3D engine, the speaker crosstalk canceller, the mixer, the sample-rate converters and the wavetable voices run arithmetic that was decoded from the card and matches its recorded output, typically within a decibel. It is not bit-exact, and a few parts are still estimates. If something sounds different from a real card, that is worth [reporting](#reporting-a-problem). The [technical reference](reference.md) has the details.
+**This is a reverse-engineered device.** Aureal never documented the chip. The emulation was built by tracing and measuring a real SQ2500, and checked against it: the 3D engine, the speaker crosstalk canceller, the mixer, the sample-rate converters and the wavetable voices run arithmetic that was decoded from the card and matches its recorded output, typically within a decibel. Recordings of period PCs with the card playing Half-Life agree with it to about a decibel in level and tone. It is not bit-exact, and a few parts are still estimates. If something sounds different from a real card, that is worth [reporting](#reporting-a-problem). The [technical reference](reference.md) has the details.
 
 ## Download
 
@@ -20,7 +20,7 @@ Windows builds are on the [releases page](https://github.com/z2k-retro/86Box/rel
 | Setting | Default | What it does |
 | --- | --- | --- |
 | Mix rear channels into the stereo output | Off | The SQ2500 has a second (rear) output. 86Box plays stereo, so in quad mode the rear channels are lost unless this is on. Turn it on if you set the control panel to four speakers but listen in stereo |
-| CD audio input level | −12 dB | How loud the CD drive's analog audio reaches the card, against the codec's full scale. Real drives and cards varied; the default matches the music-to-game balance of Half-Life's current release. Move a step if CD music sounds too loud or too quiet against game sound |
+| CD audio input level | −12 dB | How loud the CD drive's analog audio reaches the card, against the codec's full scale. Real drives and cards varied; with the guest's Windows mixer at its untouched settings, the default matches a Pentium III with a real SQ2500 playing Half-Life's CD music. Move a step if CD music sounds too loud or too quiet against game sound |
 | Write diagnostic log | Off | Writes `vortex2.log` in the machine's folder: a status line every two seconds plus stream, routing and 3D-source events. Use it when reporting a problem |
 | Write register trace | Off | Writes `vortex2-trace.txt` (every register access, in the format of the real-card sessions) and `vortex2-dma.bin` (every block of sample data the chip fetched) in the machine's folder. `bin/v2replay -d` replays them offline into the model, reproducing the audio exactly, with any one source soloed. The files grow by tens of megabytes a minute, so turn it on only for a short run |
 
@@ -48,6 +48,10 @@ AC-3 sound in A3D 3.0 is not supported: on this card it needs a Dolby-licensed s
 - Four-speaker mode works on the emulated card, but 86Box itself outputs stereo, so the rear pair is dropped or, with **Mix rear channels into the stereo output**, folded into the front.
 - Not emulated yet: recording from the microphone or line in (only the CD input reaches the codec), the game port and MPU-401 port, real-mode DOS outside Windows, and S/PDIF.
 - Only the Windows 98 driver has been tested. Other driver versions and the Windows 2000/XP drivers may work but are untested.
+
+## Without 86Box
+
+To play A3D games on a current Windows PC rather than in an emulated one, see [A3D on DSOAL](https://github.com/z2k-retro/dsoal/tree/a3d). It replaces Aureal's A3D libraries and uses the card's direction filters through OpenAL Soft, including A3D 3.0's reverb, but does not emulate the card's speaker processing.
 
 ## Reporting a problem
 

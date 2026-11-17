@@ -1,0 +1,43 @@
+{"event": "start", "cmd": "mix", "argv": ["mix", "--log", "/home/z2k-retro/wtmix.jsonl"], "chip_ctrl": "0x103260", "utc": "2026-11-17T14:31:37.540582Z"}
+{"event": "muted_others", "utc": "2026-11-17T14:31:37.540755Z"}
+{"event": "mix", "source": "adb", "via_mixer": false, "level_in": 4096, "level": [4096.0, 4096.0, 4096.0], "first": [4096, 4096, 4096, 4096, 4096, 4096, 4096, 4096, 4096, 4096, 4096, 4096], "utc": "2026-11-17T14:31:37.571362Z"}
+{"event": "mix", "source": "adb", "via_mixer": true, "level_in": 4096, "level": [4096.0, 4096.0, 4096.0], "first": [-9262, -11704, 4096, 4096, 4096, 4096, 4096, 4096, 4096, 4096, 4096, 4096], "utc": "2026-11-17T14:31:37.604790Z"}
+{"event": "mix", "source": "wt", "via_mixer": false, "level_in": 4096, "level": [6500.0, 6500.0, 6500.0], "first": [6500, 6500, 6500, 6500, 6500, 6500, 6500, 6500, 6500, 6500, 6500, 6500], "utc": "2026-11-17T14:31:37.637998Z"}
+{"event": "mix", "source": "wt", "via_mixer": true, "level_in": 4096, "level": [6500.0, 6500.0, 6500.0], "first": [4096, 4096, 6500, 6500, 6500, 6500, 6500, 6500, 6500, 6500, 6500, 6500], "utc": "2026-11-17T14:31:37.674573Z"}
+{"event": "mix", "source": "adb", "via_mixer": false, "level_in": 8192, "level": [8192.0, 8192.0, 8192.0], "first": [8192, 8192, 8192, 8192, 8192, 8192, 8192, 8192, 8192, 8192, 8192, 8192], "utc": "2026-11-17T14:31:37.709735Z"}
+{"event": "mix", "source": "adb", "via_mixer": true, "level_in": 8192, "level": [8192.0, 8192.0, 8192.0], "first": [8192, 8192, 8192, 8192, 8192, 8192, 8192, 8192, 8192, 8192, 8192, 8192], "utc": "2026-11-17T14:31:37.748271Z"}
+{"event": "mix", "source": "wt", "via_mixer": false, "level_in": 8192, "level": [13001.0, 13001.0, 13001.0], "first": [13001, 13001, 13001, 13001, 13001, 13001, 13001, 13001, 13001, 13001, 13001, 13001], "utc": "2026-11-17T14:31:37.785310Z"}
+{"event": "mix", "source": "wt", "via_mixer": true, "level_in": 8192, "level": [13001.0, 13001.0, 13001.0], "first": [8192, 8192, 13001, 13001, 13001, 13001, 13001, 13001, 13001, 13001, 13001, 13001], "utc": "2026-11-17T14:31:37.826082Z"}
+{"event": "mix_gain", "in_gain": "0x0", "level": 2048.0, "utc": "2026-11-17T14:31:37.839690Z"}
+{"event": "mix_gain", "in_gain": "0x4", "level": 3072.0, "utc": "2026-11-17T14:31:37.853412Z"}
+{"event": "mix_gain", "in_gain": "0x8", "level": 4096.0, "utc": "2026-11-17T14:31:37.867420Z"}
+{"event": "mix_gain", "in_gain": "0xc", "level": 6144.0, "utc": "2026-11-17T14:31:37.881407Z"}
+{"event": "mix_gain", "in_gain": "0x10", "level": 8192.0, "utc": "2026-11-17T14:31:37.895416Z"}
+{"event": "start", "cmd": "clear", "argv": ["clear", "--log", "/home/z2k-retro/wtmix.jsonl"], "chip_ctrl": "0x103260", "utc": "2026-11-17T14:31:38.005982Z"}
+{"event": "write", "what": "mixer rate off", "addr": "0x21f00", "old": "0x0", "wrote": "0x0", "readback": "0x0", "utc": "2026-11-17T14:31:38.006153Z"}
+{"event": "write", "what": "mixer work-to-do: none", "addr": "0x21e84", "old": "0x0", "wrote": "0x0", "readback": "0x0", "utc": "2026-11-17T14:31:38.006222Z"}
+{"event": "write", "what": "vdb link: none", "addr": "0x28140", "old": "0xffff", "wrote": "0xffff", "readback": "0xffff", "utc": "2026-11-17T14:31:38.006283Z"}
+{"event": "write", "what": "wt fifo: off", "addr": "0x160a0", "old": "0x100", "wrote": "0x0", "readback": "0x0", "utc": "2026-11-17T14:31:38.006343Z"}
+{"event": "write", "what": "PARM3: hard mute", "addr": "0x828c", "old": "0x0", "wrote": "0x0", "readback": "0x0", "utc": "2026-11-17T14:31:38.006400Z"}
+{"event": "write", "what": "vdb rate off", "addr": "0x28400", "old": "0x0", "wrote": "0x0", "readback": "0x0", "utc": "2026-11-17T14:31:38.006460Z"}
+{"event": "write", "what": "src rate off", "addr": "0x26cc0", "old": "0x0", "wrote": "0x0", "readback": "0x0", "utc": "2026-11-17T14:31:38.006517Z"}
+{"event": "write", "what": "src hdr: none", "addr": "0x26c84", "old": "0x0", "wrote": "0x0", "readback": "0x0", "utc": "2026-11-17T14:31:38.006571Z"}
+{"event": "write", "what": "vdb hdr: none", "addr": "0x282f8", "old": "0xffff", "wrote": "0xffff", "readback": "0xffff", "utc": "2026-11-17T14:31:38.006624Z"}
+{"event": "write", "what": "vdb link: none", "addr": "0x28100", "old": "0xffff", "wrote": "0xffff", "readback": "0xffff", "utc": "2026-11-17T14:31:38.006678Z"}
+{"event": "write", "what": "fifo a: off", "addr": "0x16100", "old": "0x0", "wrote": "0x0", "readback": "0x0", "utc": "2026-11-17T14:31:38.006750Z"}
+{"event": "write", "what": "fifo b: off", "addr": "0x16104", "old": "0x0", "wrote": "0x0", "readback": "0x0", "utc": "2026-11-17T14:31:38.006807Z"}
+{"event": "start", "cmd": "mix", "argv": ["mix", "--log", "/home/z2k-retro/wtmix.jsonl"], "chip_ctrl": "0x103260", "utc": "2026-11-17T14:32:08.582958Z"}
+{"event": "muted_others", "utc": "2026-11-17T14:32:08.583130Z"}
+{"event": "mix", "source": "adb", "via_mixer": false, "level_in": 4096, "level": [4096.0, 4096.0, 4096.0], "first": [4096, 4096, 4096, 4096, 4096, 4096, 4096, 4096, 4096, 4096, 4096, 4096], "utc": "2026-11-17T14:32:08.614204Z"}
+{"event": "mix", "source": "adb", "via_mixer": true, "level_in": 4096, "level": [4096.0, 4096.0, 4096.0], "first": [4096, 4096, 4096, 4096, 4096, 4096, 4096, 4096, 4096, 4096, 4096, 4096], "utc": "2026-11-17T14:32:08.649093Z"}
+{"event": "mix", "source": "wt", "via_mixer": false, "level_in": 4096, "level": [6500.0, 6500.0, 6500.0], "first": [6500, 6500, 6500, 6500, 6500, 6500, 6500, 6500, 6500, 6500, 6500, 6500], "utc": "2026-11-17T14:32:08.682754Z"}
+{"event": "mix", "source": "wt", "via_mixer": true, "level_in": 4096, "level": [6500.0, 6500.0, 6500.0], "first": [4096, 4096, 6500, 6500, 6500, 6500, 6500, 6500, 6500, 6500, 6500, 6500], "utc": "2026-11-17T14:32:08.719494Z"}
+{"event": "mix", "source": "adb", "via_mixer": false, "level_in": 8192, "level": [8192.0, 8192.0, 8192.0], "first": [8192, 8192, 8192, 8192, 8192, 8192, 8192, 8192, 8192, 8192, 8192, 8192], "utc": "2026-11-17T14:32:08.754748Z"}
+{"event": "mix", "source": "adb", "via_mixer": true, "level_in": 8192, "level": [8192.0, 8192.0, 8192.0], "first": [8192, 8192, 8192, 8192, 8192, 8192, 8192, 8192, 8192, 8192, 8192, 8192], "utc": "2026-11-17T14:32:08.794003Z"}
+{"event": "mix", "source": "wt", "via_mixer": false, "level_in": 8192, "level": [13001.0, 13001.0, 13001.0], "first": [13001, 13001, 13001, 13001, 13001, 13001, 13001, 13001, 13001, 13001, 13001, 13001], "utc": "2026-11-17T14:32:08.830891Z"}
+{"event": "mix", "source": "wt", "via_mixer": true, "level_in": 8192, "level": [13001.0, 13001.0, 13001.0], "first": [8192, 8192, 13001, 13001, 13001, 13001, 13001, 13001, 13001, 13001, 13001, 13001], "utc": "2026-11-17T14:32:08.871493Z"}
+{"event": "mix_gain", "in_gain": "0x0", "level": 2048.0, "utc": "2026-11-17T14:32:08.885217Z"}
+{"event": "mix_gain", "in_gain": "0x4", "level": 3072.0, "utc": "2026-11-17T14:32:08.899055Z"}
+{"event": "mix_gain", "in_gain": "0x8", "level": 4096.0, "utc": "2026-11-17T14:32:08.913213Z"}
+{"event": "mix_gain", "in_gain": "0xc", "level": 6144.0, "utc": "2026-11-17T14:32:08.927326Z"}
+{"event": "mix_gain", "in_gain": "0x10", "level": 8192.0, "utc": "2026-11-17T14:32:08.941485Z"}

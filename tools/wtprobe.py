@@ -24,6 +24,9 @@ Run on the X79 host with the card bound to vfio-pci and no VM running, like srcp
                                              (about 10 s)
   sudo ./wtprobe.py own                      the voice's own ADB source (the A3D-input route) against
                                              its input, with DSREG, pan and gain varied (about 10 s)
+  sudo ./wtprobe.py reso [--out FILE.npz]   the filter's feedback (resonance) word: impulse and step
+                                             responses at four cut-offs and 16 feedback values
+                                             (about 30 s)
   sudo ./wtprobe.py clear
 
 The chain: a second-half voice (global 40, local 8) with DSREG clear, so it plays onto its half's
@@ -81,11 +84,12 @@ def mute_others(bar, log):
     log(event='muted_others')
 
 
-def voice_setup(bar, log, pan, cho, rev, ds=False, gain=0xcf, level=None, ingain=0xcf, state=7, filt=0xcf):
+def voice_setup(bar, log, pan, cho, rev, ds=False, gain=0xcf, level=None, ingain=0xcf, state=7, filt=0xcf,
+                pattern=None, fb=0):
     w = sp.w
     w(bar, log, WT_FIFO_PC, 0, 'wt fifo: off')
     for i in range(64):
-        lv = LEVEL if level is None else level
+        lv = (pattern[i] if pattern else LEVEL) if level is None else level
         bar.wr(WT_FIFO_DATA + 4 * i, ((lv & 0xffff) << 16) | (lv & 0xffff))   # both halves: steady whether a word holds one sample or two
     log(event='wt_preload', readback=[hex(bar.rd(WT_FIFO_DATA + 4 * i) & 0xffff) for i in range(4)])
     w(bar, log, WT_CTRL, 0x1aa3, 'half control (driver value)')
@@ -98,7 +102,7 @@ def voice_setup(bar, log, pan, cho, rev, ds=False, gain=0xcf, level=None, ingain
     w(bar, log, WTDMA_CTRL, 0x22000, 'wt dma: signed 16-bit')
     w(bar, log, WT_PARM + 0, (filt << 24) | 0xa000 | (gain << 16), 'PARM0: filter open, gain, 48 kHz (direct pair: left gain)')
     w(bar, log, WT_PARM + 4, (filt << 24) | 0xa001 | (gain << 16), 'PARM1: same, state bit differing (direct pair: right gain)')
-    w(bar, log, WT_PARM + 8, 0, 'PARM2: no feedback, phase 0')
+    w(bar, log, WT_PARM + 8, (fb & 0xffff) << 16, f'PARM2: feedback {fb:#06x}, phase 0')
     w(bar, log, WT_PARM + 12, (parm3(pan, cho, rev) & 0x001fffff) | (state << 21) | (ingain << 24), f'PARM3: input gain {ingain:#04x} pan {pan:#04x} chorus {cho:#04x} reverb {rev:#04x}')
     w(bar, log, WT_RUN, 0, 'running flag (driver writes 0)')
 
@@ -112,10 +116,12 @@ def voice_stop(bar, log):
     sp.w(bar, log, WT_PARM + 12, 0, 'PARM3: hard mute')
 
 
-def capture_bus(bar, log, bus, pan, cho, rev, ds=False, gain=0xcf, level=None, go=True, ingain=0xcf, state=7, filt=0xcf):
+def capture_bus(bar, log, bus, pan, cho, rev, ds=False, gain=0xcf, level=None, go=True, ingain=0xcf, state=7, filt=0xcf,
+                pattern=None, fb=0):
     sp.SRC_FEED = ALL[bus]
     sp.setup(bar, log, 0, 13, 0x4000, pattern=[0] * 64)
-    voice_setup(bar, log, pan, cho, rev, ds=ds, gain=gain, level=level, ingain=ingain, state=state, filt=filt)
+    voice_setup(bar, log, pan, cho, rev, ds=ds, gain=gain, level=level, ingain=ingain, state=state, filt=filt,
+                pattern=pattern, fb=fb)
     if go:
         voice_go(bar)
     r, _, _ = sp.flush_and_read(bar, log, flush=False)
@@ -189,7 +195,7 @@ def capture_mix(bar, log, source, via_mixer, level=0x1000, in_gain=0x08):
 
 def main():
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
-    if cmd not in ('start', 'bus', 'sweep', 'levels', 'gains', 'state', 'mix', 'own', 'clear'):
+    if cmd not in ('start', 'bus', 'sweep', 'levels', 'gains', 'state', 'mix', 'own', 'reso', 'clear'):
         sys.exit(__doc__)
     if sp.vm_running():
         sys.exit('a QEMU process is running; stop the VM first (this needs the card idle)')
@@ -328,6 +334,28 @@ def main():
         for g in (0xcf, 0xc0, 0xa0):
             lv, r = capture_bus(bar, quiet, 'own', 0x3f, 0x7f, 0x7f, ds=False, level=0x1000, gain=g)
             log(event='own_gain', gain=hex(g), level=[round(v, 1) for v in lv])
+    elif cmd == 'reso':
+        # the filter's feedback (resonance) word, PARM2 bits 31-16, which the driver never sets.
+        # The voice's FIFO holds one impulse in 64 words, so it plays an impulse every 64 samples
+        # (1.33 ms); each capture holds about two of them as they come through the four-stage
+        # filter. Three cut-offs, feedback from 0 to 0xffff, and a step for the DC gain.
+        import numpy as np
+        mute_others(bar, log)
+        imp = [0x2000] + [0] * 63
+        step = [0x1000] * 32 + [0] * 32
+        fbs = [0, 0x0400, 0x0800, 0x1000, 0x2000, 0x3000, 0x4000, 0x5000, 0x6000, 0x7000, 0x7fff,
+               0x8000, 0xa000, 0xc000, 0xe000, 0xffff]
+        rows = []
+        for filt in (0xb0, 0xb8, 0xc0, 0xcf):
+            for fb in fbs:
+                for name, pat in (('impulse', imp), ('step', step)):
+                    lv, r = capture_bus(bar, quiet, 'ds_left', 0, 0x7f, 0x7f, ds=True, filt=filt, pattern=pat, fb=fb)
+                    rows.append((filt, fb, 0 if name == 'impulse' else 1, *((r + [0] * 160)[:160])))
+                log(event='reso', filt=hex(filt), fb=hex(fb), peak=max(rows[-2][3:], key=abs),
+                    impulse=[x for x in rows[-2][3:] if x][:24])
+        path = sp.arg('--out', 'wtprobe-reso.npz', str)
+        np.savez(path, rows=np.array(rows))
+        log(event='saved', path=path)
     elif cmd == 'clear':
         mix_clear(bar, log)
         voice_stop(bar, log)

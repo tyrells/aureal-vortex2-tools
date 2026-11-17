@@ -14,6 +14,8 @@ then idle and nothing else writes to it). Nothing here needs a guest or a driver
   sudo ./srcprobe.py sweep [--step S] [--wing W] [--out FILE.npz] [--log FILE]
                                                   stage 3: 'run' for every S-th time fraction
                                                   (0..16383), saving each pass's output
+  sudo ./srcprobe.py release                      take the codec out of reset and start the AC-link
+                                                  (the chip's audio clock); a cold card has it held
   sudo ./srcprobe.py clear                        undo everything this script sets
 
 The chain, following the method of the register map's author (names from his map):
@@ -260,6 +262,23 @@ def wake():
     time.sleep(0.05)
 
 
+def release(bar, log):
+    """Run 3 on the card: nothing moved on either rate. A cold card's global control word
+    (PCI_GCR, 0x2a00c) reads 0x00303260, with bit 21 (External Reset, which drives the reset pin
+    of the AC'97 codec) set, and the codec supplies the AC-link bit clock (12.288 MHz), the chip's
+    audio clock. The Windows driver ends with the bit clear (0x01103260). This clears it and runs
+    the codec link start-up that ALSA's vortex_codec_init uses (CODEC_CTRL, 0x29184)."""
+    GCR, CODEC_CTRL = 0x2a00c, 0x29184
+    log(event='release_before', gcr=hex(bar.rd(GCR)), codec_ctrl=hex(bar.rd(CODEC_CTRL)))
+    w(bar, log, GCR, bar.rd(GCR) & ~(1 << 21), 'GCR: External Reset off (codec out of reset)')
+    time.sleep(0.02)
+    for v in (0x00a8, 0x80a8, 0x80e8, 0x80a8, 0x00a8, 0x00e8):
+        w(bar, log, CODEC_CTRL, v, 'codec link start-up (ALSA sequence)')
+        time.sleep(0.002)
+    time.sleep(0.05)
+    log(event='release_after', gcr=hex(bar.rd(GCR)), codec_ctrl=hex(bar.rd(CODEC_CTRL)))
+
+
 def vm_running():
     try:
         return any(open(f'/proc/{p}/comm').read().startswith('qemu') for p in os.listdir('/proc') if p.isdigit())
@@ -272,7 +291,7 @@ def arg(name, default, conv=lambda s: int(s, 0)):
 
 
 def main():
-    if len(sys.argv) < 2 or sys.argv[1] not in ('ram', 'run', 'sweep', 'clear'):
+    if len(sys.argv) < 2 or sys.argv[1] not in ('ram', 'run', 'sweep', 'clear', 'release'):
         sys.exit(__doc__)
     if vm_running():
         sys.exit('a QEMU process is running; stop the VM first (this needs the card idle)')
@@ -311,6 +330,8 @@ def main():
         path = arg('--out', 'srcprobe-sweep.npz', str)
         np.savez(path, fracs=np.array(fracs), fifo_out=np.array(outs), dbuf=np.array(dbufs), wing=wing, ratio=ratio)
         log(event='saved', path=path, points=len(fracs))
+    elif cmd == 'release':
+        release(bar, log)
     elif cmd == 'clear':
         for r in (0, 17):                       # both rates this script uses
             RATE = r

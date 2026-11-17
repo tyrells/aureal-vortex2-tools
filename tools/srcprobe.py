@@ -19,6 +19,8 @@ then idle and nothing else writes to it). Nothing here needs a guest or a driver
   sudo ./srcprobe.py ampsweep [--frac F] [--out FILE.npz]
                                                   one phase at 576 impulse heights (1-64, then every
                                                   64 to 32767), about 10 s
+  sudo ./srcprobe.py clip [--out FILE.npz]        patterns that drive the output past full scale
+                                                  (wrap or saturate?), about 2 s
   sudo ./srcprobe.py clear                        undo everything this script sets
 
 The chain, following the method of the register map's author (names from his map):
@@ -165,7 +167,7 @@ def stage_ram(bar, log):
 
 # ---------------------------------------------------------------- stage 2
 
-def setup(bar, log, frac, wing, ratio, impulse_at=8, amp=0x4000, dmaptr=32):
+def setup(bar, log, frac, wing, ratio, impulse_at=8, amp=0x4000, dmaptr=32, pattern=None):
     k, a, b = SRC_K, FIFO_IN, FIFO_OUT
     log(event='before', regs=regs(bar))
     if bar.rd(0x2a00c) & (1 << 21):
@@ -195,7 +197,8 @@ def setup(bar, log, frac, wing, ratio, impulse_at=8, amp=0x4000, dmaptr=32):
         bar.wr(SRC_OUTPUT_DOUBLE_BUFFER + 8 * k + 4 * i, 0)
     # 3. FIFOs: input preloaded with an impulse, output cleared
     for i in range(64):
-        bar.wr(FIFO_VDB_CHANNEL_DATA + 0x100 * a + 4 * i, amp if i == impulse_at else 0)
+        v = (pattern[i] if i < len(pattern) else 0) if pattern else (amp if i == impulse_at else 0)
+        bar.wr(FIFO_VDB_CHANNEL_DATA + 0x100 * a + 4 * i, v & 0xffff)
         bar.wr(FIFO_VDB_CHANNEL_DATA + 0x100 * b + 4 * i, 0)
     log(event='preload', fifo=a, impulse_at=impulse_at, amp=hex(amp),
         readback=[hex(x) for x in window(bar, FIFO_VDB_CHANNEL_DATA + 0x100 * a, 16)])
@@ -329,7 +332,7 @@ def arg(name, default, conv=lambda s: int(s, 0)):
 
 
 def main():
-    if len(sys.argv) < 2 or sys.argv[1] not in ('ram', 'run', 'sweep', 'ampsweep', 'clear', 'release'):
+    if len(sys.argv) < 2 or sys.argv[1] not in ('ram', 'run', 'sweep', 'ampsweep', 'clip', 'clear', 'release'):
         sys.exit(__doc__)
     if vm_running():
         sys.exit('a QEMU process is running; stop the VM first (this needs the card idle)')
@@ -376,6 +379,34 @@ def main():
         path = arg('--out', 'srcprobe-sweep.npz', str)
         np.savez(path, fracs=np.array(fracs), response=np.array(outs), fifo_out=np.array(dbufs), wing=wing, ratio=ratio, amp=amp)
         log(event='saved', path=path, points=len(fracs))
+    elif cmd == 'clip':
+        # what the converter does past full scale (wrap or saturate). At the half-sample phase the
+        # taps sum in absolute value to about 1.9, so 32 samples of +-A with the taps' signs give
+        # an output near 1.9 x A: at A = 0x3fff it fits, above it does not. Also a full-scale step
+        # (overshoot of about 9%) and the inverted patterns for the negative side.
+        import numpy as np
+        frac = 0x2000
+        def signs(j):                            # sign of the tap that sample j meets at the peak
+            return 1 if j in (15, 16) else (-1) ** (15 - j if j < 15 else j - 16)
+        pats = {}
+        for amp_i in (0x2000, 0x3fff, 0x4800, 0x6000, 0x7fff):
+            pats[f'signs+{amp_i:#06x}'] = [signs(j) * amp_i for j in range(32)]
+            pats[f'signs-{amp_i:#06x}'] = [-signs(j) * amp_i for j in range(32)]
+        pats['step up'] = [-32768] * 16 + [32767] * 16
+        pats['step down'] = [32767] * 16 + [-32768] * 16
+        quiet = Log(os.devnull)
+        names, outs = [], []
+        for name, pat in pats.items():
+            for rep_i in range(3):               # three takes each
+                setup(bar, quiet, frac, wing, ratio, pattern=pat)
+                r, o, d = flush_and_read(bar, quiet, flush=False)
+                clear(bar, quiet)
+                names.append(name); outs.append((r + [0] * 160)[:160])
+            log(event='clip', name=name, max=max(outs[-1]), min=min(outs[-1]))
+        path = arg('--out', 'srcprobe-clip.npz', str)
+        np.savez(path, names=np.array(names), response=np.array(outs),
+                 patterns=np.array([pats[n] for n in names]), frac=frac)
+        log(event='saved', path=path, points=len(names))
     elif cmd == 'ampsweep':
         # one phase, many impulse heights: how each output depends on the height shows the
         # arithmetic (one rounded product, or several, e.g. a table entry plus an interpolated step)

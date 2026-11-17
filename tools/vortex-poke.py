@@ -36,6 +36,12 @@ timestamp (the same clock as qemu-trace.log) for alignment.
                                                  little-endian, skipping 0x2919c (a read acknowledges the
                                                  timer); for scan-dump.py. Meant for a guest at the Windows 98
                                                  boot menu or a plain DOS prompt, before any driver runs
+  sudo ./vortex-poke.py wtsend --loop [--log FILE] [--hold SECS] [--min-age SECS]
+                                                 the same sweep on any looping sound (Half-Life: stand next
+                                                 to a generator or machinery hum): takes a second-half voice
+                                                 with DSREG clear that has played one sound for --min-age s
+                                                 (4), 1.5 s per step (about 45 s); if the sound stops or the
+                                                 voice is reused it waits for another loop and resumes
   sudo ./vortex-poke.py wtsend [--log FILE] [--hold SECS]
                                                  run alongside 'A3DTEST run20' (wtpan): finds the native
                                                  48 kHz tone on a second-half voice with DSREG clear (the
@@ -164,8 +170,10 @@ def main():
         log = open(logpath, 'a')
         def note(**kw):
             kw['utc'] = utc(); line = json.dumps(kw); log.write(line + '\n'); log.flush(); print(line)
-        hold = float(sys.argv[sys.argv.index('--hold') + 1]) if '--hold' in sys.argv else 2.5
-        wtsend(bar, note, hold)
+        loop = '--loop' in sys.argv
+        hold = float(sys.argv[sys.argv.index('--hold') + 1]) if '--hold' in sys.argv else (1.5 if loop else 2.5)
+        age = float(sys.argv[sys.argv.index('--min-age') + 1]) if '--min-age' in sys.argv else 4.0
+        wtsend(bar, note, hold, loop, age)
         return
     if cmd == 'wtfilt':
         log = open(logpath, 'a')
@@ -731,46 +739,110 @@ def wtsend_schedule():
     return s
 
 
-def wtsend(bar, note, hold=2.5):
-    """Run alongside 'A3DTEST run20': a native tone at 48 kHz on a second-half voice, DSREG clear."""
-    print('waiting for a second-half wavetable voice at 48 kHz with DSREG clear (A3DTEST run20, part D)...')
-    v = None
-    while v is None:
+def _ws_running(bar, k):
+    return bool(bar.rd(WT_FIFO + 4 * k) & 0x10)
+
+
+def _ws_find_tone(bar):
+    """A3DTEST run20 part D: a 48 kHz tone on a second-half voice with DSREG clear."""
+    while True:
         ds1 = bar.rd(DSREG[1])
         for k in range(32, 64):
-            if (bar.rd(WT_FIFO + 4 * k) & 0x10 and bar.rd(WT_PARM(k)) & 0xfffe == 0xa000
-                    and not (ds1 >> (k - 32)) & 1):
-                v = k
+            if _ws_running(bar, k) and bar.rd(WT_PARM(k)) & 0xfffe == 0xa000 and not (ds1 >> (k - 32)) & 1:
+                time.sleep(2.0)
+                return k
         time.sleep(0.2)
-    time.sleep(2.0)
-    base = WT_PARM(v)
-    read = [bar.rd(base + 4 * k) for k in range(4)]
-    p3 = read[3]
-    note(event='ws_found', voice=v, read=[hex(x) for x in read], dsreg=[hex(bar.rd(a)) for a in DSREG],
-         pan=hex((p3 >> 14) & 0x7f), cho=hex((p3 >> 7) & 0x7f), rev=hex(p3 & 0x7f), hold=hold)
-    def apply(f):
-        w3 = ((p3 & ~0x1fffff) | (f.get('pan', (p3 >> 14) & 0x7f) << 14)
-              | (f.get('cho', (p3 >> 7) & 0x7f) << 7) | f.get('rev', p3 & 0x7f)) & 0xffffffff
-        bar.wr(base + 12, w3)
-        return w3
+
+
+def _ws_find_loop(bar, note, min_age, exclude=()):
+    """A second-half voice with DSREG clear that has kept the same sound (PARM0 and PARM3
+    unchanged) and kept running for min_age seconds: a looping sound, as in Half-Life."""
+    seen = {}                                   # voice -> (key, first time)
+    last_report = 0
+    while True:
+        now = time.monotonic()
+        ds1 = bar.rd(DSREG[1])
+        live = 0
+        for k in range(32, 64):
+            if k in exclude or (ds1 >> (k - 32)) & 1 or not _ws_running(bar, k):
+                seen.pop(k, None)
+                continue
+            live += 1
+            base = WT_PARM(k)
+            key = (bar.rd(base) & ~1, bar.rd(base + 12))
+            if k not in seen or seen[k][0] != key:
+                seen[k] = (key, now)
+            elif now - seen[k][1] >= min_age:
+                return k
+        if now - last_report > 5:
+            print(f'  {live} second-half voices with DSREG clear running; waiting for one to stay '
+                  f'on one sound for {min_age:g} s (stand next to a looping sound)')
+            last_report = now
+        time.sleep(0.1)
+
+
+def wtsend(bar, note, hold=2.5, loop=False, min_age=4.0):
+    """Step a second-half voice's reverb send, chorus send and pan field.
+    Default: the 48 kHz tone of 'A3DTEST run20'. With loop=True: any looping sound, such as
+    Half-Life's ambient loops; if the voice is lost (the sound stops, or the driver reuses the
+    voice), the sweep waits for another loop and resumes at the same step, and a lost voice is
+    left as the driver set it rather than restored."""
+    sched = wtsend_schedule()
+    i = 0
     try:
-        for i, (name, f) in enumerate(wtsend_schedule()):
-            w = apply(f)
-            note(event='ws_step', index=i, name=name, wrote=hex(w))
-            time.sleep(hold)
-            back = bar.rd(base + 12)
-            if not (bar.rd(WT_FIFO + 4 * v) & 0x10):
-                time.sleep(0.05)
-                if not (bar.rd(WT_FIFO + 4 * v) & 0x10) and bar.rd(base) & 0xfffe != 0xa000:
-                    note(event='ws_voice_stopped', index=i)
-                    break
-            if back & 0x1fffff != w & 0x1fffff:
-                note(event='ws_changed_under_us', index=i, readback=hex(back))
+        while i < len(sched):
+            if loop:
+                print('waiting for a looping sound on a second-half voice with DSREG clear...')
+                v = _ws_find_loop(bar, note, min_age)
+            else:
+                print('waiting for a second-half wavetable voice at 48 kHz with DSREG clear (A3DTEST run20, part D)...')
+                v = _ws_find_tone(bar)
+            base = WT_PARM(v)
+            read = [bar.rd(base + 4 * k) for k in range(4)]
+            p0, p3 = read[0] & ~1, read[3]
+            note(event='ws_found', voice=v, mode='loop' if loop else 'tone', read=[hex(x) for x in read],
+                 dsreg=[hex(bar.rd(a)) for a in DSREG], pan=hex((p3 >> 14) & 0x7f), cho=hex((p3 >> 7) & 0x7f),
+                 rev=hex(p3 & 0x7f), hold=hold, resume_at=i)
+            def compose(f):
+                return ((p3 & ~0x1fffff) | (f.get('pan', (p3 >> 14) & 0x7f) << 14)
+                        | (f.get('cho', (p3 >> 7) & 0x7f) << 7) | f.get('rev', p3 & 0x7f)) & 0xffffffff
+            def same_sound():
+                return _ws_running(bar, v) and bar.rd(base) & ~1 == p0
+            ok = True
+            while i < len(sched):
+                name, f = sched[i]
+                w = compose(f)
+                bar.wr(base + 12, w)
+                note(event='ws_step', index=i, name=name, voice=v, wrote=hex(w))
+                end = time.monotonic() + hold
+                while time.monotonic() < end:
+                    time.sleep(0.05)
+                    back = bar.rd(base + 12)
+                    if not same_sound() or back != w:
+                        time.sleep(0.05)
+                        if not same_sound() or bar.rd(base + 12) != w:
+                            ok = False
+                            break
+                if not ok:
+                    note(event='ws_voice_lost', index=i, voice=v, parm0=hex(bar.rd(base)),
+                         parm3=hex(bar.rd(base + 12)), running=_ws_running(bar, v))
+                    if not loop:
+                        return
+                    break                       # find another loop; redo this step
+                i += 1
+            if ok:
+                bar.wr(base + 12, p3)
+                note(event='ws_restored', voice=v)
     except KeyboardInterrupt:
-        note(event='interrupted')
-    finally:
-        apply({})
-        note(event='ws_restored')
+        note(event='interrupted', index=i)
+        try:
+            if same_sound():
+                bar.wr(base + 12, p3)
+                note(event='ws_restored', voice=v)
+        except NameError:
+            pass
+    note(event='ws_done', steps=len(sched), completed=i)
+
 
 def xtshift_schedule(orig):
     """The EQ shift sweep: identical input and coefficients, only the shift changes.

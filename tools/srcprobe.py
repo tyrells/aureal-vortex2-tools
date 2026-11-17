@@ -81,6 +81,8 @@ DMA_VDBCH_MODE = 0x27A00                 # + ch * 4: bits 17-14 format (8 = 16-b
                                          # (memory to card), 0 = write (card to memory)
 SRC_SRCADDR = 0x20 + SRC_K               # VDB source address of the converter's output
 SRC_DSTADDR = 0x40 + SRC_K               # VDB destination address of its input
+SRC_FEED = None                          # VDB source feeding the converter: FIFO a, or another
+                                         # source address (wtprobe.py sets a wavetable bus)
 OUT_DST = FIFO_OUT                       # VDB destination of the output: FIFO b, or with --alias
                                          # its alias (0x20 + b), which the map lists separately
 
@@ -174,7 +176,8 @@ def setup(bar, log, frac, wing, ratio, impulse_at=8, amp=0x4000, dmaptr=32, patt
         release(bar, log)                       # the clock only runs with the codec out of reset
     # 1. VDB routes, not yet enabled: header SRCk -> FIFO a to SRC k in -> SRC k out to FIFO b
     w(bar, log, VDB_ACTIVE_SR, bar.rd(VDB_ACTIVE_SR) & ~(1 << RATE), 'vdb rate off')
-    w(bar, log, VDB_WTDRAM_HEADERLINKS + 4 * RATE, (a << 8) | SRC_DSTADDR, 'vdb hdr: FIFO a -> SRC in')
+    feed = a if SRC_FEED is None else SRC_FEED
+    w(bar, log, VDB_WTDRAM_HEADERLINKS + 4 * RATE, (feed << 8) | SRC_DSTADDR, f'vdb hdr: {feed:#04x} -> SRC in')
     w(bar, log, VDB_WTDRAM_DESTLINKS + 4 * SRC_DSTADDR, (SRC_SRCADDR << 8) | OUT_DST, 'vdb link: SRC out -> FIFO b')
     w(bar, log, VDB_WTDRAM_DESTLINKS + 4 * OUT_DST, END, 'vdb link: end')
     # 2. the converter and its work-to-do entry on its own rate

@@ -11,7 +11,7 @@ then idle and nothing else writes to it). Nothing here needs a guest or a driver
                                                   stage 2: one pass: route FIFO -> SRC -> FIFO,
                                                   preload an impulse, enable, flush, read back
                                                   (--alias: send the output to FIFO b's alias)
-  sudo ./srcprobe.py sweep [--step S] [--wing W] [--amp A] [--out FILE.npz] [--log FILE]
+  sudo ./srcprobe.py sweep [--step S | --phases FILE] [--wing W] [--amp A] [--out FILE.npz] [--log FILE]
                                                   stage 3: 'run' for every S-th time fraction
                                                   (0..16383), saving each pass's output
   sudo ./srcprobe.py release                      take the codec out of reset and start the AC-link
@@ -209,8 +209,9 @@ def setup(bar, log, frac, wing, ratio, impulse_at=8, amp=0x4000, dmaptr=32):
     w(bar, log, DMA_VDBCH_MODE + 4 * b, (8 << 14), 'dma mode b: 16-bit, write (record)')
     w(bar, log, FIFO_VDB_CHANNEL_PC + 4 * b, PC_VALID | PC_EMPTY, 'fifo b: valid, empty')
     w(bar, log, SRC_ACTIVE_SAMPLE_RATE, bar.rd(SRC_ACTIVE_SAMPLE_RATE) | (1 << RATE), 'src rate on')
-    # 4. enable the route's sample rate
-    w(bar, log, VDB_ACTIVE_SR, bar.rd(VDB_ACTIVE_SR) | (1 << RATE), 'vdb rate on')
+    # 4. the route's sample rate is enabled in flush_and_read, just before the capture starts
+    #    (full sweep: enabling it here left a variable delay, and 5% of captures began after the
+    #    impulse had started coming out and lost the first taps)
 
 
 def flush_and_read(bar, log, reads=0, gap=0.0, flush=True):
@@ -228,6 +229,7 @@ def flush_and_read(bar, log, reads=0, gap=0.0, flush=True):
     PAR6, DB0, DB1 = SRC_CHANNEL_PARAMS[6] + 4 * k, SRC_OUTPUT_DOUBLE_BUFFER + 8 * k, SRC_OUTPUT_DOUBLE_BUFFER + 8 * k + 4
     rd = bar.rd
     raw = []
+    bar.wr(VDB_ACTIVE_SR, rd(VDB_ACTIVE_SR) | (1 << RATE))   # vdb rate on: the chain starts now
     t0 = time.perf_counter()
     while time.perf_counter() - t0 < 0.003:
         raw.append((rd(PAR6), rd(DB0), rd(DB1)))
@@ -356,6 +358,8 @@ def main():
         import numpy as np
         step = arg('--step', 256)
         fracs = list(range(0, 0x4000, step))
+        if '--phases' in sys.argv:               # a list of fractions, one per line (make_srctab.py --todo)
+            fracs = [int(x, 0) for x in open(arg('--phases', None, str)).read().split()]
         outs, dbufs = [], []
         quiet = Log(os.devnull)
         for f in fracs:
@@ -363,7 +367,7 @@ def main():
             for attempt in range(4):            # a capture that lost or doubled a sample does not sum
                 r, o, d = flush_and_read(bar, quiet, flush=False)   # to the impulse: take it again
                 clear(bar, quiet)
-                if abs(sum(r) - amp) <= 8:
+                if abs(sum(r) - amp) <= 8 and not any(r[:2]):   # whole, and caught from the start
                     break
                 setup(bar, quiet, f, wing, ratio, amp=amp)
             r = (r + [0] * 160)[:160]

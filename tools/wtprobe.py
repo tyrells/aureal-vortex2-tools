@@ -14,6 +14,9 @@ Run on the X79 host with the card bound to vfio-pci and no VM running, like srcp
   sudo ./wtprobe.py levels [--log FILE]      the direct-stream pair (DSREG set) against the main
                                              pair, at two input levels, and the outputs with the
                                              voice silent or stopped (about 20 s)
+  sudo ./wtprobe.py gains [--out FILE.npz]  the gain byte and the input gain byte on the direct-
+                                             stream pair, the pair's pan, and the main pair with the
+                                             other voices muted (about 15 s)
   sudo ./wtprobe.py clear
 
 The chain: a second-half voice (global 40, local 8) with DSREG clear, so it plays onto its half's
@@ -61,7 +64,17 @@ def parm3(pan, cho, rev):
     return (0xcf << 24) | (7 << 21) | ((pan & 0x7f) << 14) | ((cho & 0x7f) << 7) | (rev & 0x7f)
 
 
-def voice_setup(bar, log, pan, cho, rev, ds=False, gain=0xcf, level=None):
+def mute_others(bar, log):
+    """Hard-mute the half's other 31 voices (PARM3 gain state 0). On a cold card they hold
+    whatever they powered up with; levels run 1 showed a component on the main pair and sends
+    that stayed with our voice silent."""
+    for lv in range(32):
+        if lv != LV:
+            bar.wr(BANK + 0x200 + lv * 0x10 + 12, 0)
+    log(event='muted_others')
+
+
+def voice_setup(bar, log, pan, cho, rev, ds=False, gain=0xcf, level=None, ingain=0xcf):
     w = sp.w
     w(bar, log, WT_FIFO_PC, 0, 'wt fifo: off')
     for i in range(64):
@@ -79,7 +92,7 @@ def voice_setup(bar, log, pan, cho, rev, ds=False, gain=0xcf, level=None):
     w(bar, log, WT_PARM + 0, 0xcf00a000 | (gain << 16), 'PARM0: filter open, gain, 48 kHz (direct pair: left gain)')
     w(bar, log, WT_PARM + 4, 0xcf00a001 | (gain << 16), 'PARM1: same, state bit differing (direct pair: right gain)')
     w(bar, log, WT_PARM + 8, 0, 'PARM2: no feedback, phase 0')
-    w(bar, log, WT_PARM + 12, parm3(pan, cho, rev), f'PARM3: pan {pan:#04x} chorus {cho:#04x} reverb {rev:#04x}')
+    w(bar, log, WT_PARM + 12, (parm3(pan, cho, rev) & 0x00ffffff) | (ingain << 24), f'PARM3: input gain {ingain:#04x} pan {pan:#04x} chorus {cho:#04x} reverb {rev:#04x}')
     w(bar, log, WT_RUN, 0, 'running flag (driver writes 0)')
 
 
@@ -92,10 +105,10 @@ def voice_stop(bar, log):
     sp.w(bar, log, WT_PARM + 12, 0, 'PARM3: hard mute')
 
 
-def capture_bus(bar, log, bus, pan, cho, rev, ds=False, gain=0xcf, level=None, go=True):
+def capture_bus(bar, log, bus, pan, cho, rev, ds=False, gain=0xcf, level=None, go=True, ingain=0xcf):
     sp.SRC_FEED = ALL[bus]
     sp.setup(bar, log, 0, 13, 0x4000, pattern=[0] * 64)
-    voice_setup(bar, log, pan, cho, rev, ds=ds, gain=gain, level=level)
+    voice_setup(bar, log, pan, cho, rev, ds=ds, gain=gain, level=level, ingain=ingain)
     if go:
         voice_go(bar)
     r, _, _ = sp.flush_and_read(bar, log, flush=False)
@@ -113,7 +126,7 @@ def capture_bus(bar, log, bus, pan, cho, rev, ds=False, gain=0xcf, level=None, g
 
 def main():
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
-    if cmd not in ('start', 'bus', 'sweep', 'levels', 'clear'):
+    if cmd not in ('start', 'bus', 'sweep', 'levels', 'gains', 'clear'):
         sys.exit(__doc__)
     if sp.vm_running():
         sys.exit('a QEMU process is running; stop the VM first (this needs the card idle)')
@@ -178,6 +191,33 @@ def main():
             for bus in ALL:
                 takes = [capture_bus(bar, quiet, bus, 0, 0x7f, 0x7f, **kw)[0] for _ in range(3)]
                 log(event='level', case=name, bus=bus, takes=[[round(v, 1) for v in t] for t in takes])
+    elif cmd == 'gains':
+        # levels run 1: on the direct-stream pair (clean, no other component) a voice at gain 0xcf
+        # and pan 0 gave 26003 for a 16384 input, 0.79 of the x2 the headroom arithmetic gives.
+        # The gain byte and the input gain byte, each stepped with the other at 0xcf; pan 0 and
+        # pan 0x3f; the other voices muted first, then the main pair checked for the component.
+        import numpy as np
+        mute_others(bar, log)
+        rows = []
+        codes = [0xcf, 0xce, 0xcc, 0xc8, 0xc0, 0xbf, 0xb8, 0xb0, 0xaf, 0xa0, 0x9f, 0x90, 0x80, 0x70, 0x60, 0x40, 0x20, 0x10, 0x08, 0x01, 0x00,
+                 0xd0, 0xdf, 0xe0, 0xef, 0xff]
+        for which in ('gain', 'ingain'):
+            for code in codes:
+                kw = {which: code}
+                lv, r = capture_bus(bar, quiet, 'ds_left', 0, 0x7f, 0x7f, ds=True, level=0x1000, **kw)
+                rows.append((0 if which == 'gain' else 1, code, 0, *lv))
+                log(event='gain', which=which, code=hex(code), level=[round(v, 1) for v in lv])
+        for pan in (0, 0x3f, 0x40, 0x7f):
+            for bus in ('ds_left', 'ds_right'):
+                lv, r = capture_bus(bar, quiet, bus, pan, 0x7f, 0x7f, ds=True, level=0x1000)
+                rows.append((2, pan, 0 if bus == 'ds_left' else 1, *lv))
+                log(event='ds_pan', pan=hex(pan), bus=bus, level=[round(v, 1) for v in lv])
+        for bus in BUSES:
+            lv, r = capture_bus(bar, quiet, bus, 0x3f, 0x7f, 0x7f, gain=0)
+            log(event='others_muted', bus=bus, level=[round(v, 1) for v in lv])
+        path = sp.arg('--out', 'wtprobe-gains.npz', str)
+        np.savez(path, rows=np.array(rows), input=0x1000)
+        log(event='saved', path=path)
     elif cmd == 'clear':
         voice_stop(bar, log)
         sp.clear(bar, log)

@@ -1,0 +1,53 @@
+{"event": "start", "cmd": "levels", "argv": ["levels", "--log", "/home/z2k-retro/wtlevels.jsonl"], "chip_ctrl": "0x103260", "utc": "2026-11-17T14:07:58.365497Z"}
+{"event": "level", "case": "main, pan 0, sends full, 0x4000", "bus": "ds_left", "takes": [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]], "utc": "2026-11-17T14:07:58.396445Z"}
+{"event": "level", "case": "main, pan 0, sends full, 0x4000", "bus": "ds_right", "takes": [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]], "utc": "2026-11-17T14:07:58.428624Z"}
+{"event": "level", "case": "main, pan 0, sends full, 0x4000", "bus": "left", "takes": [[1648.7, 4083.8, -786.3], [1651.3, -783.9, 4086.5], [1653.9, 4089.0, -781.2]], "utc": "2026-11-17T14:07:58.462794Z"}
+{"event": "level", "case": "main, pan 0, sends full, 0x4000", "bus": "right", "takes": [[12.8, 1542.7, -1517.0], [-11.5, -1541.3, 1518.2], [-18.7, -1548.4, 1511.0]], "utc": "2026-11-17T14:07:58.498340Z"}
+{"event": "level", "case": "main, pan 0, sends full, 0x4000", "bus": "reverb", "takes": [[1618.7, 1275.2, 1962.1], [1621.4, 1278.0, 1964.8], [1620.9, 1964.3, 1277.5]], "utc": "2026-11-17T14:07:58.533930Z"}
+{"event": "level", "case": "main, pan 0, sends full, 0x4000", "bus": "chorus", "takes": [[1629.6, -992.8, 4252.0], [1585.1, -1037.2, 4207.5], [1623.7, -998.9, 4246.3]], "utc": "2026-11-17T14:07:58.571418Z"}
+{"event": "level", "case": "main, pan 0, sends full, 0x2000", "bus": "ds_left", "takes": [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]], "utc": "2026-11-17T14:07:58.609248Z"}
+{"event": "level", "case": "main, pan 0, sends full, 0x2000", "bus": "ds_right", "takes": [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]], "utc": "2026-11-17T14:07:58.647626Z"}
+{"event": "level", "case": "main, pan 0, sends full, 0x2000", "bus": "left", "takes": [[808.9, 3244.1, -1626.2], [772.5, 3208.0, -1662.9], [837.0, -1597.9, 3271.9]], "utc": "2026-11-17T14:07:58.687600Z"}
+{"event": "level", "case": "main, pan 0, sends full, 0x2000", "bus": "right", "takes": [[-20.7, 1509.1, -1550.5], [-0.4, 1529.3, -1530.2], [-15.8, -1545.6, 1513.9]], "utc": "2026-11-17T14:07:58.728990Z"}
+{"event": "level", "case": "main, pan 0, sends full, 0x2000", "bus": "reverb", "takes": [[810.5, 1154.0, 467.0], [811.4, 1154.8, 468.0], [816.7, 473.5, 1160.0]], "utc": "2026-11-17T14:07:58.771379Z"}
+{"event": "level", "case": "main, pan 0, sends full, 0x2000", "bus": "chorus", "takes": [[813.2, 3435.8, -1809.5], [871.5, -30.0, 1772.9], [775.8, 3398.3, -1846.7]], "utc": "2026-11-17T14:07:58.814926Z"}
+{"event": "level", "case": "direct (DSREG set), 0x4000", "bus": "ds_left", "takes": [[26003.0, 26003.0, 26003.0], [26003.0, 26003.0, 26003.0], [26003.0, 26003.0, 26003.0]], "utc": "2026-11-17T14:07:58.856772Z"}
+{"event": "level", "case": "direct (DSREG set), 0x4000", "bus": "ds_right", "takes": [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]], "utc": "2026-11-17T14:07:58.900794Z"}
+{"event": "level", "case": "direct (DSREG set), 0x4000", "bus": "left", "takes": [[4.5, 2439.7, -2430.7], [-8.0, -2443.0, 2427.0], [-6.3, 602.5, -615.1]], "utc": "2026-11-17T14:07:58.945538Z"}
+{"event": "level", "case": "direct (DSREG set), 0x4000", "bus": "right", "takes": [[16.1, -1513.8, 1545.9], [-18.6, -1548.3, 1511.2], [-9.8, -1539.6, 1519.9]], "utc": "2026-11-17T14:07:58.989342Z"}
+{"event": "level", "case": "direct (DSREG set), 0x4000", "bus": "reverb", "takes": [[1621.1, 1277.7, 1964.5], [1623.9, 1967.3, 1280.5], [1602.0, 1419.5, 1784.5]], "utc": "2026-11-17T14:07:59.034190Z"}
+{"event": "level", "case": "direct (DSREG set), 0x4000", "bus": "chorus", "takes": [[1603.3, -1019.1, 4225.7], [1567.4, 4190.1, -1055.2], [1583.2, -1039.3, 4205.7]], "utc": "2026-11-17T14:07:59.078356Z"}
+{"event": "level", "case": "direct (DSREG set), 0x2000", "bus": "ds_left", "takes": [[13001.0, 13001.0, 13001.0], [13001.0, 13001.0, 13001.0], [13001.0, 13001.0, 13001.0]], "utc": "2026-11-17T14:07:59.122653Z"}
+{"event": "level", "case": "direct (DSREG set), 0x2000", "bus": "ds_right", "takes": [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]], "utc": "2026-11-17T14:07:59.167401Z"}
+{"event": "level", "case": "direct (DSREG set), 0x2000", "bus": "left", "takes": [[-18.8, -2454.1, 2416.5], [-14.1, -2449.2, 2421.0], [-24.6, 2410.6, -2459.8]], "utc": "2026-11-17T14:07:59.210618Z"}
+{"event": "level", "case": "direct (DSREG set), 0x2000", "bus": "right", "takes": [[-13.5, -1543.3, 1516.3], [-11.8, 1518.0, -1541.5], [-12.7, -1542.5, 1517.2]], "utc": "2026-11-17T14:07:59.255098Z"}
+{"event": "level", "case": "direct (DSREG set), 0x2000", "bus": "reverb", "takes": [[810.3, 466.9, 1153.7], [798.4, 830.6, 766.2], [809.0, 766.2, 851.9]], "utc": "2026-11-17T14:07:59.301461Z"}
+{"event": "level", "case": "direct (DSREG set), 0x2000", "bus": "chorus", "takes": [[808.4, -1814.0, 3430.8], [796.3, 3418.8, -1826.2], [774.1, 3396.5, -1848.4]], "utc": "2026-11-17T14:07:59.346452Z"}
+{"event": "level", "case": "main, voice gain 0", "bus": "ds_left", "takes": [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]], "utc": "2026-11-17T14:07:59.389899Z"}
+{"event": "level", "case": "main, voice gain 0", "bus": "ds_right", "takes": [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]], "utc": "2026-11-17T14:07:59.435626Z"}
+{"event": "level", "case": "main, voice gain 0", "bus": "left", "takes": [[2.1, 2437.3, -2433.1], [-11.2, 2423.8, -2446.3], [-14.3, -2449.4, 2420.8]], "utc": "2026-11-17T14:07:59.479203Z"}
+{"event": "level", "case": "main, voice gain 0", "bus": "right", "takes": [[-7.2, 1522.5, -1536.9], [-18.1, 1511.8, -1547.9], [-7.0, -1536.9, 1522.8]], "utc": "2026-11-17T14:07:59.522954Z"}
+{"event": "level", "case": "main, voice gain 0", "bus": "reverb", "takes": [[14.4, -60.6, 89.5], [-5.4, -348.8, 338.0], [-1.4, -344.8, 342.0]], "utc": "2026-11-17T14:07:59.565112Z"}
+{"event": "level", "case": "main, voice gain 0", "bus": "chorus", "takes": [[-21.3, -2643.8, 2601.2], [3.1, -2619.3, 2625.6], [-12.4, -2634.7, 2610.0]], "utc": "2026-11-17T14:07:59.608849Z"}
+{"event": "level", "case": "direct, voice gain 0", "bus": "ds_left", "takes": [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]], "utc": "2026-11-17T14:07:59.649999Z"}
+{"event": "level", "case": "direct, voice gain 0", "bus": "ds_right", "takes": [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]], "utc": "2026-11-17T14:07:59.690830Z"}
+{"event": "level", "case": "direct, voice gain 0", "bus": "left", "takes": [[-7.7, 753.3, -768.7], [-18.5, -2453.6, 2416.6], [-14.8, -2449.9, 2420.2]], "utc": "2026-11-17T14:07:59.735686Z"}
+{"event": "level", "case": "direct, voice gain 0", "bus": "right", "takes": [[0.3, 1529.9, -1529.3], [-15.8, -1545.6, 1514.1], [-13.2, -1543.0, 1516.6]], "utc": "2026-11-17T14:07:59.778330Z"}
+{"event": "level", "case": "direct, voice gain 0", "bus": "reverb", "takes": [[-8.6, -352.0, 334.8], [-6.9, -350.3, 336.4], [0.6, -342.8, 344.0]], "utc": "2026-11-17T14:07:59.821051Z"}
+{"event": "level", "case": "direct, voice gain 0", "bus": "chorus", "takes": [[-22.6, 960.9, -1006.1], [-33.3, 2589.2, -2655.8], [-18.2, 2604.3, -2640.7]], "utc": "2026-11-17T14:07:59.863326Z"}
+{"event": "level", "case": "voice not started", "bus": "ds_left", "takes": [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]], "utc": "2026-11-17T14:07:59.905680Z"}
+{"event": "level", "case": "voice not started", "bus": "ds_right", "takes": [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]], "utc": "2026-11-17T14:07:59.946833Z"}
+{"event": "level", "case": "voice not started", "bus": "left", "takes": [[1622.4, 4057.5, -812.8], [1611.9, 4047.1, -823.3], [1598.8, -836.5, 4034.0]], "utc": "2026-11-17T14:07:59.988937Z"}
+{"event": "level", "case": "voice not started", "bus": "right", "takes": [[40.9, -6.9, 88.8], [-6.1, 1523.9, -1536.0], [-16.4, -781.1, 748.4]], "utc": "2026-11-17T14:08:00.034247Z"}
+{"event": "level", "case": "voice not started", "bus": "reverb", "takes": [[1608.8, 1276.0, 1941.6], [1617.7, 1274.2, 1961.1], [1617.0, 1273.6, 1960.4]], "utc": "2026-11-17T14:08:00.076246Z"}
+{"event": "level", "case": "voice not started", "bus": "chorus", "takes": [[1627.5, -995.1, 4250.0], [1596.4, -1026.0, 4218.8], [1591.9, -1030.6, 4214.3]], "utc": "2026-11-17T14:08:00.119361Z"}
+{"event": "start", "cmd": "clear", "argv": ["clear", "--log", "/home/z2k-retro/wtlevels.jsonl"], "chip_ctrl": "0x103260", "utc": "2026-11-17T14:08:00.229284Z"}
+{"event": "write", "what": "wt fifo: off", "addr": "0x160a0", "old": "0x140", "wrote": "0x0", "readback": "0x0", "utc": "2026-11-17T14:08:00.229438Z"}
+{"event": "write", "what": "PARM3: hard mute", "addr": "0x828c", "old": "0x0", "wrote": "0x0", "readback": "0x0", "utc": "2026-11-17T14:08:00.229512Z"}
+{"event": "write", "what": "vdb rate off", "addr": "0x28400", "old": "0x0", "wrote": "0x0", "readback": "0x0", "utc": "2026-11-17T14:08:00.229565Z"}
+{"event": "write", "what": "src rate off", "addr": "0x26cc0", "old": "0x0", "wrote": "0x0", "readback": "0x0", "utc": "2026-11-17T14:08:00.229610Z"}
+{"event": "write", "what": "src hdr: none", "addr": "0x26c84", "old": "0x0", "wrote": "0x0", "readback": "0x0", "utc": "2026-11-17T14:08:00.229651Z"}
+{"event": "write", "what": "vdb hdr: none", "addr": "0x282f8", "old": "0xffff", "wrote": "0xffff", "readback": "0xffff", "utc": "2026-11-17T14:08:00.229689Z"}
+{"event": "write", "what": "vdb link: none", "addr": "0x28100", "old": "0xffff", "wrote": "0xffff", "readback": "0xffff", "utc": "2026-11-17T14:08:00.229742Z"}
+{"event": "write", "what": "fifo a: off", "addr": "0x16100", "old": "0x0", "wrote": "0x0", "readback": "0x0", "utc": "2026-11-17T14:08:00.229781Z"}
+{"event": "write", "what": "fifo b: off", "addr": "0x16104", "old": "0x0", "wrote": "0x0", "readback": "0x0", "utc": "2026-11-17T14:08:00.229817Z"}

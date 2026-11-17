@@ -11,6 +11,9 @@ Run on the X79 host with the card bound to vfio-pci and no VM running, like srcp
   sudo ./wtprobe.py sweep [--out FILE.npz] [--log FILE]
                                              stage 3: pan 0..0x7f and both sends 0..0x7f, every
                                              bus each time (about a minute)
+  sudo ./wtprobe.py levels [--log FILE]      the direct-stream pair (DSREG set) against the main
+                                             pair, at two input levels, and the outputs with the
+                                             voice silent or stopped (about 20 s)
   sudo ./wtprobe.py clear
 
 The chain: a second-half voice (global 40, local 8) with DSREG clear, so it plays onto its half's
@@ -50,6 +53,7 @@ WT_FIFO_PC = 0x16000 + VOICE * 4
 WTDMA_CTRL = 0x27900 + VOICE * 4
 WTDMA_STAT = 0x27d00 + VOICE * 4
 BUSES = {'left': 0xa2, 'right': 0xa3, 'reverb': 0xa4, 'chorus': 0xa5}
+ALL = {'ds_left': 0xa0, 'ds_right': 0xa1, **BUSES}
 LEVEL = 0x4000
 
 
@@ -57,19 +61,23 @@ def parm3(pan, cho, rev):
     return (0xcf << 24) | (7 << 21) | ((pan & 0x7f) << 14) | ((cho & 0x7f) << 7) | (rev & 0x7f)
 
 
-def voice_setup(bar, log, pan, cho, rev):
+def voice_setup(bar, log, pan, cho, rev, ds=False, gain=0xcf, level=None):
     w = sp.w
     w(bar, log, WT_FIFO_PC, 0, 'wt fifo: off')
     for i in range(64):
-        bar.wr(WT_FIFO_DATA + 4 * i, (LEVEL << 16) | LEVEL)   # both halves: steady whether a word holds one sample or two
+        lv = LEVEL if level is None else level
+        bar.wr(WT_FIFO_DATA + 4 * i, ((lv & 0xffff) << 16) | (lv & 0xffff))   # both halves: steady whether a word holds one sample or two
     log(event='wt_preload', readback=[hex(bar.rd(WT_FIFO_DATA + 4 * i) & 0xffff) for i in range(4)])
     w(bar, log, WT_CTRL, 0x1aa3, 'half control (driver value)')
     w(bar, log, WT_SRAMP, 0x00830000, 'SRAMP (driver value)')
-    w(bar, log, WT_DSREG, bar.rd(WT_DSREG) & ~(1 << LV), 'DSREG: voice clear (main pair and sends)')
+    if ds:
+        w(bar, log, WT_DSREG, bar.rd(WT_DSREG) | (1 << LV), 'DSREG: voice set (direct-stream pair 32/33)')
+    else:
+        w(bar, log, WT_DSREG, bar.rd(WT_DSREG) & ~(1 << LV), 'DSREG: voice clear (main pair and sends)')
     w(bar, log, WT_SYNC, 0, 'pair sync off')
     w(bar, log, WTDMA_CTRL, 0x22000, 'wt dma: signed 16-bit')
-    w(bar, log, WT_PARM + 0, 0xcfcfa000, 'PARM0: filter open, gain unity, 48 kHz')
-    w(bar, log, WT_PARM + 4, 0xcfcfa001, 'PARM1: same, state bit differing (base word used)')
+    w(bar, log, WT_PARM + 0, 0xcf00a000 | (gain << 16), 'PARM0: filter open, gain, 48 kHz (direct pair: left gain)')
+    w(bar, log, WT_PARM + 4, 0xcf00a001 | (gain << 16), 'PARM1: same, state bit differing (direct pair: right gain)')
     w(bar, log, WT_PARM + 8, 0, 'PARM2: no feedback, phase 0')
     w(bar, log, WT_PARM + 12, parm3(pan, cho, rev), f'PARM3: pan {pan:#04x} chorus {cho:#04x} reverb {rev:#04x}')
     w(bar, log, WT_RUN, 0, 'running flag (driver writes 0)')
@@ -84,11 +92,12 @@ def voice_stop(bar, log):
     sp.w(bar, log, WT_PARM + 12, 0, 'PARM3: hard mute')
 
 
-def capture_bus(bar, log, bus, pan, cho, rev):
-    sp.SRC_FEED = BUSES[bus]
+def capture_bus(bar, log, bus, pan, cho, rev, ds=False, gain=0xcf, level=None, go=True):
+    sp.SRC_FEED = ALL[bus]
     sp.setup(bar, log, 0, 13, 0x4000, pattern=[0] * 64)
-    voice_setup(bar, log, pan, cho, rev)
-    voice_go(bar)
+    voice_setup(bar, log, pan, cho, rev, ds=ds, gain=gain, level=level)
+    if go:
+        voice_go(bar)
     r, _, _ = sp.flush_and_read(bar, log, flush=False)
     voice_stop(bar, log)
     sp.clear(bar, log)
@@ -104,7 +113,7 @@ def capture_bus(bar, log, bus, pan, cho, rev):
 
 def main():
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
-    if cmd not in ('start', 'bus', 'sweep', 'clear'):
+    if cmd not in ('start', 'bus', 'sweep', 'levels', 'clear'):
         sys.exit(__doc__)
     if sp.vm_running():
         sys.exit('a QEMU process is running; stop the VM first (this needs the card idle)')
@@ -155,6 +164,20 @@ def main():
         path = sp.arg('--out', 'wtprobe-sweep.npz', str)
         np.savez(path, rows=np.array(rows), cols=np.array(['pan', 'cho', 'rev', *BUSES, *[b + '_even' for b in BUSES], *[b + '_odd' for b in BUSES]]), level=LEVEL)
         log(event='saved', path=path, settings=len(rows))
+    elif cmd == 'levels':
+        # the direct-stream pair against the main pair, and the alternating component on its own:
+        # each case on all six outputs, three takes
+        cases = [('main, pan 0, sends full, 0x4000', dict(ds=False)),
+                 ('main, pan 0, sends full, 0x2000', dict(ds=False, level=0x2000)),
+                 ('direct (DSREG set), 0x4000', dict(ds=True)),
+                 ('direct (DSREG set), 0x2000', dict(ds=True, level=0x2000)),
+                 ('main, voice gain 0', dict(ds=False, gain=0)),
+                 ('direct, voice gain 0', dict(ds=True, gain=0)),
+                 ('voice not started', dict(ds=False, go=False))]
+        for name, kw in cases:
+            for bus in ALL:
+                takes = [capture_bus(bar, quiet, bus, 0, 0x7f, 0x7f, **kw)[0] for _ in range(3)]
+                log(event='level', case=name, bus=bus, takes=[[round(v, 1) for v in t] for t in takes])
     elif cmd == 'clear':
         voice_stop(bar, log)
         sp.clear(bar, log)

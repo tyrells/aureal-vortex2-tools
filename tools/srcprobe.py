@@ -54,7 +54,7 @@ PC_FREEZE = 1 << 20
 PC_VALID = 1 << 4
 PC_EMPTY = 1 << 5
 SRC_INPUT_FIFO = 0x26000
-SRC_OUTPUT_DOUBLE_BUFFER = 0x26800
+SRC_OUTPUT_DOUBLE_BUFFER = 0x26800       # 32 words: 2 per channel (the double buffer), run 1 of stage 1
 SRC_NEXT_CHANNEL = 0x26C00               # + k * 4: bit 4 valid, bits 3-0 next channel
 SRC_SR_HEADER = 0x26C40                  # + rate * 4: bit 4 valid, bits 3-0 first channel
 SRC_ACTIVE_SAMPLE_RATE = 0x26CC0         # bit per sample rate
@@ -180,8 +180,8 @@ def setup(bar, log, frac, wing, ratio, impulse_at=8, amp=0x4000):
     w(bar, log, SRC_SR_HEADER + 4 * RATE, k, 'src hdr: channel k, no next')
     for i in range(0x80 // 4):
         bar.wr(SRC_INPUT_FIFO + 0x80 * k + 4 * i, 0)
-    for i in range(0x40 // 4):
-        bar.wr(SRC_OUTPUT_DOUBLE_BUFFER + 0x40 * k + 4 * i, 0)
+    for i in range(2):
+        bar.wr(SRC_OUTPUT_DOUBLE_BUFFER + 8 * k + 4 * i, 0)
     # 3. FIFOs: input preloaded with an impulse, output cleared
     for i in range(64):
         bar.wr(FIFO_VDB_CHANNEL_DATA + 0x100 * a + 4 * i, amp if i == impulse_at else 0)
@@ -209,7 +209,7 @@ def flush_and_read(bar, log, reads=20, gap=0.0005):
                       'params6': hex(bar.rd(SRC_CHANNEL_PARAMS[6] + 4 * k))})
         time.sleep(gap)
     out = [s16(x) for x in window(bar, FIFO_VDB_CHANNEL_DATA + 0x100 * b, 64)]
-    dbuf = [s16(x) for x in window(bar, SRC_OUTPUT_DOUBLE_BUFFER + 0x40 * k, 16)]
+    dbuf = [s16(x) for x in window(bar, SRC_OUTPUT_DOUBLE_BUFFER + 8 * k, 2)]
     sin = [s16(x) for x in window(bar, SRC_INPUT_FIFO + 0x80 * k, 32)]
     log(event='snapshots', snaps=snaps)
     log(event='result', fifo_out=out, src_output_double_buffer=dbuf, src_input_fifo=sin)

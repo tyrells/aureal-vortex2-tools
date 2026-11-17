@@ -1,0 +1,17 @@
+{"event": "start", "cmd": "own", "argv": ["own", "--log", "/home/z2k-retro/wtown.jsonl"], "chip_ctrl": "0x103260", "utc": "2026-11-17T14:53:21.087338Z"}
+{"event": "muted_others", "utc": "2026-11-17T14:53:21.087492Z"}
+{"event": "own", "dsreg": true, "pan": "0x0", "level_in": 4096, "level": [3276.0, 3276.0, 3276.0], "utc": "2026-11-17T14:53:21.097729Z"}
+{"event": "own", "dsreg": true, "pan": "0x0", "level_in": 8192, "level": [6552.0, 6552.0, 6552.0], "utc": "2026-11-17T14:53:21.107897Z"}
+{"event": "own", "dsreg": true, "pan": "0x3f", "level_in": 4096, "level": [3276.0, 3276.0, 3276.0], "utc": "2026-11-17T14:53:21.118120Z"}
+{"event": "own", "dsreg": true, "pan": "0x3f", "level_in": 8192, "level": [6552.0, 6552.0, 6552.0], "utc": "2026-11-17T14:53:21.128496Z"}
+{"event": "own", "dsreg": true, "pan": "0x7f", "level_in": 4096, "level": [3276.0, 3276.0, 3276.0], "utc": "2026-11-17T14:53:21.139039Z"}
+{"event": "own", "dsreg": true, "pan": "0x7f", "level_in": 8192, "level": [6552.0, 6552.0, 6552.0], "utc": "2026-11-17T14:53:21.149829Z"}
+{"event": "own", "dsreg": false, "pan": "0x0", "level_in": 4096, "level": [3276.0, 3276.0, 3276.0], "utc": "2026-11-17T14:53:21.160765Z"}
+{"event": "own", "dsreg": false, "pan": "0x0", "level_in": 8192, "level": [6552.0, 6552.0, 6552.0], "utc": "2026-11-17T14:53:21.171812Z"}
+{"event": "own", "dsreg": false, "pan": "0x3f", "level_in": 4096, "level": [3276.0, 3276.0, 3276.0], "utc": "2026-11-17T14:53:21.182969Z"}
+{"event": "own", "dsreg": false, "pan": "0x3f", "level_in": 8192, "level": [6552.0, 6552.0, 6552.0], "utc": "2026-11-17T14:53:21.194269Z"}
+{"event": "own", "dsreg": false, "pan": "0x7f", "level_in": 4096, "level": [3276.0, 3276.0, 3276.0], "utc": "2026-11-17T14:53:21.205917Z"}
+{"event": "own", "dsreg": false, "pan": "0x7f", "level_in": 8192, "level": [6552.0, 6552.0, 6552.0], "utc": "2026-11-17T14:53:21.217515Z"}
+{"event": "own_gain", "gain": "0xcf", "level": [3276.0, 3276.0, 3276.0], "utc": "2026-11-17T14:53:21.229201Z"}
+{"event": "own_gain", "gain": "0xc0", "level": [1638.0, 1638.0, 1638.0], "utc": "2026-11-17T14:53:21.240942Z"}
+{"event": "own_gain", "gain": "0xa0", "level": [409.0, 409.0, 409.0], "utc": "2026-11-17T14:53:21.252838Z"}

@@ -70,8 +70,10 @@ VDB_ACTIVE_SR = 0x28400                  # bit per sample rate (ALSA VORTEX_ADB_
 END = 0xffff
 
 SRC_K, FIFO_IN, FIFO_OUT = 0, 0, 1       # converter 0, VDB FIFOs 0 (in) and 1 (out)
-RATE = SRC_K                             # sample-rate header: SRC0 (the converter's own rate) by
-                                         # default, --rate 17 for the AC'97 port's 48 kHz
+RATE = 17                                # sample-rate header: AC'97 (48 kHz; run 4: the only rate
+                                         # that ran once the codec was out of reset); --rate 0 = SRC0
+DMA_VDBCH_MODE = 0x27A00                 # + ch * 4: bits 17-14 format (8 = 16-bit), bit 13 1 = read
+                                         # (memory to card), 0 = write (card to memory)
 SRC_SRCADDR = 0x20 + SRC_K               # VDB source address of the converter's output
 SRC_DSTADDR = 0x40 + SRC_K               # VDB destination address of its input
 OUT_DST = FIFO_OUT                       # VDB destination of the output: FIFO b, or with --alias
@@ -163,6 +165,8 @@ def stage_ram(bar, log):
 def setup(bar, log, frac, wing, ratio, impulse_at=8, amp=0x4000, dmaptr=32):
     k, a, b = SRC_K, FIFO_IN, FIFO_OUT
     log(event='before', regs=regs(bar))
+    if bar.rd(0x2a00c) & (1 << 21):
+        release(bar, log)                       # the clock only runs with the codec out of reset
     # 1. VDB routes, not yet enabled: header SRCk -> FIFO a to SRC k in -> SRC k out to FIFO b
     w(bar, log, VDB_ACTIVE_SR, bar.rd(VDB_ACTIVE_SR) & ~(1 << RATE), 'vdb rate off')
     w(bar, log, VDB_WTDRAM_HEADERLINKS + 4 * RATE, (a << 8) | SRC_DSTADDR, 'vdb hdr: FIFO a -> SRC in')
@@ -196,28 +200,35 @@ def setup(bar, log, frac, wing, ratio, impulse_at=8, amp=0x4000, dmaptr=32):
     # DMA pointer where a DMA of dmaptr samples would have left it (run 2: with both at 0 the
     # VDB moved nothing and the FIFO raised a DMA request)
     w(bar, log, FIFO_VDB_CHANNEL_PC + 4 * a, ((dmaptr & 0x3f) << 12) | PC_VALID, 'fifo a: valid, DMA pointer ahead, VDB pointer 0')
+    # FIFO a plays (memory to card), FIFO b records (card to memory); run 4: with b left at its
+    # cold mode the converter ran but nothing reached b
+    w(bar, log, DMA_VDBCH_MODE + 4 * a, (8 << 14) | (1 << 13), 'dma mode a: 16-bit, read (play)')
+    w(bar, log, DMA_VDBCH_MODE + 4 * b, (8 << 14), 'dma mode b: 16-bit, write (record)')
     w(bar, log, FIFO_VDB_CHANNEL_PC + 4 * b, PC_VALID | PC_EMPTY, 'fifo b: valid, empty')
     w(bar, log, SRC_ACTIVE_SAMPLE_RATE, bar.rd(SRC_ACTIVE_SAMPLE_RATE) | (1 << RATE), 'src rate on')
     # 4. enable the route's sample rate
     w(bar, log, VDB_ACTIVE_SR, bar.rd(VDB_ACTIVE_SR) | (1 << RATE), 'vdb rate on')
 
 
-def flush_and_read(bar, log, reads=40, gap=0.0005, flush=True):
+def flush_and_read(bar, log, reads=0, gap=0.0, flush=True):
     k, a, b = SRC_K, FIFO_IN, FIFO_OUT
     # 5. pump: the flush bit on the input FIFO (mask bits 31-22 left 0 = use new values)
     if flush:
         pc = bar.rd(FIFO_VDB_CHANNEL_PC + 4 * a)
         w(bar, log, FIFO_VDB_CHANNEL_PC + 4 * a, (pc & 0x3fffff) | PC_FLUSH, 'fifo a: flush')
-    snaps = []
-    for i in range(reads):
-        snaps.append({'t_ms': round(i * gap * 1000, 2),
-                      'pc_in': hex(bar.rd(FIFO_VDB_CHANNEL_PC + 4 * a)),
-                      'pc_out': hex(bar.rd(FIFO_VDB_CHANNEL_PC + 4 * b)),
-                      'params4': hex(bar.rd(SRC_CHANNEL_PARAMS[4] + 4 * k)),
-                      'params6': hex(bar.rd(SRC_CHANNEL_PARAMS[6] + 4 * k)),
-                      'src_in0_15': [hex(bar.rd(SRC_INPUT_FIFO + 0x80 * k + 4 * j) & 0xffff) for j in range(16)],
-                      'dbuf': [hex(bar.rd(SRC_OUTPUT_DOUBLE_BUFFER + 8 * k + 4 * j) & 0xffff) for j in range(2)]})
-        time.sleep(gap)
+    # watch for 3 ms (about 144 samples at 48 kHz); keep only the readings that changed, so the
+    # double buffer's 2 words are seen at every output the converter makes
+    snaps, last = [], None
+    t0 = time.perf_counter()
+    while time.perf_counter() - t0 < 0.003:
+        cur = (bar.rd(SRC_CHANNEL_PARAMS[6] + 4 * k), bar.rd(SRC_OUTPUT_DOUBLE_BUFFER + 8 * k) & 0xffff,
+               bar.rd(SRC_OUTPUT_DOUBLE_BUFFER + 8 * k + 4) & 0xffff, bar.rd(FIFO_VDB_CHANNEL_PC + 4 * a),
+               bar.rd(FIFO_VDB_CHANNEL_PC + 4 * b))
+        if cur != last:
+            snaps.append({'t_us': round((time.perf_counter() - t0) * 1e6), 'params6': hex(cur[0]),
+                          'dbuf': [s16(cur[1]), s16(cur[2])], 'pc_in': hex(cur[3]), 'pc_out': hex(cur[4])})
+            last = cur
+    time.sleep(0.005)
     out = [s16(x) for x in window(bar, FIFO_VDB_CHANNEL_DATA + 0x100 * b, 64)]
     dbuf = [s16(x) for x in window(bar, SRC_OUTPUT_DOUBLE_BUFFER + 8 * k, 2)]
     sin = [s16(x) for x in window(bar, SRC_INPUT_FIFO + 0x80 * k, 32)]

@@ -228,6 +228,30 @@ def clear(bar, log):
     w(bar, log, FIFO_VDB_CHANNEL_PC + 4 * b, 0, 'fifo b: off')
 
 
+def wake():
+    """With no VM attached, vfio-pci may leave the card in D3hot with memory decoding off,
+    and then every read returns 0xffffffff. Keep it powered and turn decoding on."""
+    d = f'/sys/bus/pci/devices/{DEV}'
+    try:
+        with open(f'{d}/power/control', 'w') as f:
+            f.write('on')
+    except OSError as e:
+        print(f'could not set power/control: {e}')
+    try:
+        with open(f'{d}/config', 'r+b') as f:
+            f.seek(4); cmd = int.from_bytes(f.read(2), 'little')
+            if not cmd & 2:
+                f.seek(4); f.write((cmd | 2).to_bytes(2, 'little'))
+                print(f'memory decoding was off (COMMAND {cmd:#06x}); turned it on')
+    except OSError as e:
+        print(f'could not read/write config space: {e}')
+    try:
+        print('power state:', open(f'{d}/power_state').read().strip())
+    except OSError:
+        pass
+    time.sleep(0.05)
+
+
 def vm_running():
     try:
         return any(open(f'/proc/{p}/comm').read().startswith('qemu') for p in os.listdir('/proc') if p.isdigit())
@@ -244,9 +268,11 @@ def main():
         sys.exit(__doc__)
     if vm_running():
         sys.exit('a QEMU process is running; stop the VM first (this needs the card idle)')
+    wake()
     bar = Bar()
     if bar.rd(0x2a00c) == 0xffffffff:
-        sys.exit('the card reads 0xffffffff: not in D0 or memory decoding off (see appendix C)')
+        sys.exit('the card still reads 0xffffffff after waking it; check '
+                 f'/sys/bus/pci/devices/{DEV}/power_state and try vfio-pci with disable_idle_d3=1')
     global OUT_DST
     if '--alias' in sys.argv:
         OUT_DST = 0x20 + FIFO_OUT

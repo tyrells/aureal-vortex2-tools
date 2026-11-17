@@ -61,7 +61,7 @@ def voice_setup(bar, log, pan, cho, rev):
     w = sp.w
     w(bar, log, WT_FIFO_PC, 0, 'wt fifo: off')
     for i in range(64):
-        bar.wr(WT_FIFO_DATA + 4 * i, LEVEL)
+        bar.wr(WT_FIFO_DATA + 4 * i, (LEVEL << 16) | LEVEL)   # both halves: steady whether a word holds one sample or two
     log(event='wt_preload', readback=[hex(bar.rd(WT_FIFO_DATA + 4 * i) & 0xffff) for i in range(4)])
     w(bar, log, WT_CTRL, 0x1aa3, 'half control (driver value)')
     w(bar, log, WT_SRAMP, 0x00830000, 'SRAMP (driver value)')
@@ -92,10 +92,14 @@ def capture_bus(bar, log, bus, pan, cho, rev):
     r, _, _ = sp.flush_and_read(bar, log, flush=False)
     voice_stop(bar, log)
     sp.clear(bar, log)
-    nz = [x for x in r if x]
-    # the plateau: the most common non-zero value (the DC level while the FIFO lasts)
-    plateau = max(set(nz), key=nz.count) if nz else 0
-    return plateau, r
+    # the level: mean over the settled part (run 1 alternated sample by sample with the FIFO's
+    # words holding the level in one half only, so take even and odd samples apart as well)
+    nz = [i for i, x in enumerate(r) if x]
+    seg = r[nz[0] + 8: nz[0] + 72] if nz else []
+    if len(seg) < 16:
+        return (0.0, 0.0, 0.0), r
+    ev, od = sum(seg[0::2]) / len(seg[0::2]), sum(seg[1::2]) / len(seg[1::2])
+    return ((ev + od) / 2, ev, od), r
 
 
 def main():
@@ -129,7 +133,7 @@ def main():
         pan, rev, cho = sp.arg('--pan', 0x3f), sp.arg('--rev', 0x7f), sp.arg('--cho', 0x7f)
         for bus in BUSES:
             plateau, r = capture_bus(bar, quiet, bus, pan, cho, rev)
-            log(event='bus', bus=bus, pan=pan, rev=rev, cho=cho, plateau=plateau,
+            log(event='bus', bus=bus, pan=pan, rev=rev, cho=cho, level=plateau,
                 nonzero=[(i, x) for i, x in enumerate(r) if x][:40])
     elif cmd == 'sweep':
         import numpy as np
@@ -146,10 +150,10 @@ def main():
             for bus in BUSES:
                 plateau, _ = capture_bus(bar, quiet, bus, pan, cho, rev)
                 row.append(plateau)
-            rows.append((pan, cho, rev, *row))
-            log(event='setting', pan=pan, cho=cho, rev=rev, **dict(zip(BUSES, row)))
+            rows.append((pan, cho, rev, *[x[0] for x in row], *[x[1] for x in row], *[x[2] for x in row]))
+            log(event='setting', pan=pan, cho=cho, rev=rev, **{b: [round(v, 1) for v in x] for b, x in zip(BUSES, row)})
         path = sp.arg('--out', 'wtprobe-sweep.npz', str)
-        np.savez(path, rows=np.array(rows), cols=np.array(['pan', 'cho', 'rev', *BUSES]), level=LEVEL)
+        np.savez(path, rows=np.array(rows), cols=np.array(['pan', 'cho', 'rev', *BUSES, *[b + '_even' for b in BUSES], *[b + '_odd' for b in BUSES]]), level=LEVEL)
         log(event='saved', path=path, settings=len(rows))
     elif cmd == 'clear':
         voice_stop(bar, log)

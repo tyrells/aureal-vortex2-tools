@@ -43,7 +43,8 @@ timestamp (the same clock as qemu-trace.log) for alignment.
                                                  (4), 1.5 s per step (about 45 s); if the sound stops or the
                                                  voice is reused it waits for another loop and resumes
   sudo ./vortex-poke.py wtsend [--log FILE] [--hold SECS]
-                                                 run alongside 'A3DTEST run20' (wtpan): finds the native
+                                                 run alongside 'A3DTEST run21' (a3dds) or run20: sweeps
+                                                 each 48 kHz tone buffer in turn until Ctrl-C. Finds the
                                                  48 kHz tone on a second-half voice with DSREG clear (the
                                                  send path Half-Life pans with) and steps its reverb send,
                                                  chorus send and pan fields, 2.5 s per step (about 70 s)
@@ -171,7 +172,7 @@ def main():
         def note(**kw):
             kw['utc'] = utc(); line = json.dumps(kw); log.write(line + '\n'); log.flush(); print(line)
         loop = '--loop' in sys.argv
-        hold = float(sys.argv[sys.argv.index('--hold') + 1]) if '--hold' in sys.argv else (1.5 if loop else 2.5)
+        hold = float(sys.argv[sys.argv.index('--hold') + 1]) if '--hold' in sys.argv else 1.5
         age = float(sys.argv[sys.argv.index('--min-age') + 1]) if '--min-age' in sys.argv else 4.0
         wtsend(bar, note, hold, loop, age)
         return
@@ -781,9 +782,10 @@ def _ws_find_loop(bar, note, min_age, exclude=()):
         time.sleep(0.1)
 
 
-def wtsend(bar, note, hold=2.5, loop=False, min_age=4.0):
+def wtsend(bar, note, hold=2.5, loop=False, min_age=4.0, repeat=True):
     """Step a second-half voice's reverb send, chorus send and pan field.
-    Default: the 48 kHz tone of 'A3DTEST run20'. With loop=True: any looping sound, such as
+    Default: the 48 kHz tones of 'A3DTEST run20' and 'run21', each new tone buffer swept in
+    turn until Ctrl-C. With loop=True: any looping sound, such as
     Half-Life's ambient loops; if the voice is lost (the sound stops, or the driver reuses the
     voice), the sweep waits for another loop and resumes at the same step, and a lost voice is
     left as the driver set it rather than restored."""
@@ -795,7 +797,7 @@ def wtsend(bar, note, hold=2.5, loop=False, min_age=4.0):
                 print('waiting for a looping sound on a second-half voice with DSREG clear...')
                 v = _ws_find_loop(bar, note, min_age)
             else:
-                print('waiting for a second-half wavetable voice at 48 kHz with DSREG clear (A3DTEST run20, part D)...')
+                print('waiting for a second-half wavetable voice at 48 kHz with DSREG clear (A3DTEST run21 or run20)...')
                 v = _ws_find_tone(bar)
             base = WT_PARM(v)
             read = [bar.rd(base + 4 * k) for k in range(4)]
@@ -826,13 +828,16 @@ def wtsend(bar, note, hold=2.5, loop=False, min_age=4.0):
                 if not ok:
                     note(event='ws_voice_lost', index=i, voice=v, parm0=hex(bar.rd(base)),
                          parm3=hex(bar.rd(base + 12)), running=_ws_running(bar, v))
-                    if not loop:
-                        return
-                    break                       # find another loop; redo this step
+                    break                       # find another voice; redo this step
                 i += 1
             if ok:
                 bar.wr(base + 12, p3)
                 note(event='ws_restored', voice=v)
+                if not loop and repeat:         # tone mode: sweep each new tone buffer in turn
+                    note(event='ws_done', steps=len(sched), completed=i)
+                    while _ws_running(bar, v) and bar.rd(base) & ~1 == p0:
+                        time.sleep(0.2)         # wait for this buffer to end
+                    i = 0
     except KeyboardInterrupt:
         note(event='interrupted', index=i)
         try:

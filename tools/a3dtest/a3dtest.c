@@ -25,6 +25,8 @@
  *           driver's only client, as in a game's DirectSound mode
  *   run18 = sync wttone: steady tones on a wavetable voice at each common rate (its 4-point
  *           interpolator) and a panned native tone (about 2 minutes)
+ *   run24 = sync fallback sync: more audible 3D sources than A3D slots, with fallback sources
+ *           on (about 3.5 minutes; with vortex-poke.py wtsend --loop --rate 0x5acc)
  *   run23 = sync hlds2 sync: several buffers at once on A3D's private DirectSound, so they
  *           overflow the ADB channels (about 2 minutes; with vortex-poke.py wtsend --loop)
  *   run22 = sync hlds sync: buffers on A3D's private DirectSound, as Half-Life makes them
@@ -1928,6 +1930,72 @@ static void t_hlds2(void) {
     logmsg("TEST hlds2 end");
 }
 
+/* fallback: more audible 3D sources than the chip's 16 A3D slots (run 24).
+   Runs 20-23 found no call that puts a sound on the second-half voices Half-Life uses
+   (DSREG clear, sends written per sound). The A3D 2.0 library reports 76 hardware 3D
+   channels, and its interface has a fallback-source count and a resource-manager mode; the
+   guess now is that 3D sources the A3D slots cannot take are rendered there, with gain and
+   filter for distance and the two sends for pan, and that Half-Life asks for them. This logs
+   the library's defaults, sets 24 fallback sources and the dynamic resource manager, plays 16
+   audible 3D noise sources (gain 0.3, all round), then a quieter 3D test tone (1 kHz, 11025 Hz,
+   rate word 0x5acc, gain 0.15, 3 m): azimuth -90..90 in 30-degree steps and distances 1, 3, 8
+   and 16 m, 2 s each, then 60 s held at 3 m ahead for 'vortex-poke.py wtsend --loop --rate
+   0x5acc'. The same again with the fallback count at 0. Headphones. About 3.5 minutes. */
+static void fallback_pass(int nfb, int *n) {
+    static const double az[] = { -90, -60, -30, 0, 30, 60, 90 };
+    static const double dist[] = { 1, 3, 8, 16 };
+    SRC bed[17]; DWORD d = 0; HRESULT hr; int i, nb;
+    memset(bed, 0, sizeof bed);
+    hr = IA3d4_SetNumFallbackSources(a3d, (DWORD)nfb);
+    IA3d4_GetNumFallbackSources(a3d, &d);
+    L_begin(); L_s("STEP fallback n="); L_i((*n)++); L_s(" what=SetNumFallbackSources set="); L_i(nfb); L_s(" hr="); L_x(hr); L_s(" now="); L_i((int)d); L_end();
+    for (nb = 0; nb < 16; nb++) {
+        bed[nb].src = new_source(0, STIM_NOISE, 22050, 1, 16, 2.0);
+        if (!bed[nb].src) break;
+        place(&bed[nb], nb * 22.5 + 11.25, 0, 2.0);
+        IA3dSource_SetGain(bed[nb].src, 0.3f);
+        IA3dSource_Play(bed[nb].src, A3D_LOOPED);
+        hold(bed, nb + 1, 250);
+    }
+    L_begin(); L_s("STEP fallback n="); L_i((*n)++); L_s(" fb="); L_i(nfb); L_s(" what=bed count="); L_i(nb); L_end();
+    hold(bed, nb, 1000);
+    bed[16].src = new_source(0, STIM_TONEF, 11025, 1, 16, 1.0);
+    if (bed[16].src) {
+        IA3dSource_SetGain(bed[16].src, 0.15f);
+        place(&bed[16], 0, 0, 3.0);
+        IA3dSource_Play(bed[16].src, A3D_LOOPED);
+        L_begin(); L_s("STEP fallback n="); L_i((*n)++); L_s(" fb="); L_i(nfb); L_s(" what=test play"); L_end();
+        hold(bed, 17, 1000);
+        for (i = 0; i < 7; i++) {
+            place(&bed[16], az[i] < 0 ? 360 + az[i] : az[i], 0, 3.0);
+            L_begin(); L_s("STEP fallback n="); L_i((*n)++); L_s(" fb="); L_i(nfb); L_s(" what=az"); L_kv("deg", az[i], 0); L_end();
+            hold(bed, 17, 2000);
+        }
+        for (i = 0; i < 4; i++) {
+            place(&bed[16], 0, 0, dist[i]);
+            L_begin(); L_s("STEP fallback n="); L_i((*n)++); L_s(" fb="); L_i(nfb); L_s(" what=dist"); L_kv("m", dist[i], 0); L_end();
+            hold(bed, 17, 2000);
+        }
+        place(&bed[16], 0, 0, 3.0);
+        L_begin(); L_s("STEP fallback n="); L_i((*n)++); L_s(" fb="); L_i(nfb); L_s(" what=hold for wtsend"); L_end();
+        hold(bed, 17, nfb ? 60000 : 5000);
+    }
+    for (i = 0; i < 17; i++) kill_source(&bed[i]);
+    hold(bed, 0, 1000);
+}
+static void t_fallback(void) {
+    DWORD d = 0, m = 0; HRESULT hr; int n = 0;
+    logmsg("TEST fallback begin (headphones; 16 audible 3D sources plus a quieter 3D tone, with 24 fallback sources and then 0; held 60 s for vortex-poke.py wtsend --loop --rate 0x5acc)");
+    headphones();
+    IA3d4_GetNumFallbackSources(a3d, &d); IA3d4_GetResourceManagerMode(a3d, &m);
+    L_begin(); L_s("STEP fallback n="); L_i(n++); L_s(" what=defaults fallback="); L_i((int)d); L_s(" rmmode="); L_i((int)m); L_end();
+    hr = IA3d4_SetResourceManagerMode(a3d, A3D_RESOURCE_MODE_DYNAMIC);
+    L_begin(); L_s("STEP fallback n="); L_i(n++); L_s(" what=SetResourceManagerMode dynamic hr="); L_x(hr); L_end();
+    fallback_pass(24, &n);
+    fallback_pass(0, &n);
+    logmsg("TEST fallback end");
+}
+
 /* ------------------------------------------------------------------ main */
 typedef void (*TESTFN)(void);
 static const struct { const char *name; TESTFN fn; } tests[] = {
@@ -1938,7 +2006,7 @@ static const struct { const char *name; TESTFN fn; } tests[] = {
     {"multi", t_multi}, {"dsound", t_dsound}, {"elev5", t_elev5}, {"tcsweep", t_tcsweep}, {"click90", t_click90}, {"noise2d", t_noise2d}, {"wtpath", t_wtpath},
     {"srcresp", t_srcresp}, {"midi", t_midi}, {"level", t_level}, {"hrtfgrid", t_hrtfgrid}, {"reflhf", t_reflhf},
     {"dsfill", t_dsfill}, {"dshold", t_dshold}, {"eqhold", t_eqhold}, {"dswt", t_dswt}, {"ds3d", t_ds3d}, {"dsstream", t_dsstream},
-    {"dssync", t_dssync}, {"wttone", t_wttone}, {"wtnoise", t_wtnoise}, {"wtpan", t_wtpan}, {"a3dds", t_a3dds}, {"hlds", t_hlds}, {"hlds2", t_hlds2},
+    {"dssync", t_dssync}, {"wttone", t_wttone}, {"wtnoise", t_wtnoise}, {"wtpan", t_wtpan}, {"a3dds", t_a3dds}, {"hlds", t_hlds}, {"hlds2", t_hlds2}, {"fallback", t_fallback},
 };
 static int g_noa3d;     /* run16: A3D is never opened, so DirectSound is the driver's only client */
 /* default (no arguments): the run-2 suite */
@@ -2015,6 +2083,7 @@ void entry(void) {
         else if (seq(tok, "run21")) { t_sync(); t_a3dds(); t_sync(); }
         else if (seq(tok, "run22")) { t_sync(); t_hlds(); t_sync(); }
         else if (seq(tok, "run23")) { t_sync(); t_hlds2(); t_sync(); }
+        else if (seq(tok, "run24")) { t_sync(); t_fallback(); t_sync(); }
         else if (seq(tok, "run12")) { t_sync(); t_srcresp(); t_level(); t_midi(); t_hrtfgrid(); }
         else run_named(tok);
         ran = 1;

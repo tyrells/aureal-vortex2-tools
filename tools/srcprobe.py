@@ -11,7 +11,8 @@ then idle and nothing else writes to it). Nothing here needs a guest or a driver
                                                   stage 2: one pass: route FIFO -> SRC -> FIFO,
                                                   preload an impulse, enable, flush, read back
                                                   (--alias: send the output to FIFO b's alias)
-  sudo ./srcprobe.py sweep [--step S | --phases FILE] [--wing W] [--amp A] [--out FILE.npz] [--log FILE]
+  sudo ./srcprobe.py sweep [--step S | --phases FILE] [--wing W] [--amp A] [--impulse-at I]
+                           [--out FILE.npz] [--log FILE]
                                                   stage 3: 'run' for every S-th time fraction
                                                   (0..16383), saving each pass's output
   sudo ./srcprobe.py release                      take the codec out of reset and start the AC-link
@@ -363,19 +364,20 @@ def main():
     elif cmd == 'sweep':
         import numpy as np
         step = arg('--step', 256)
+        imp = arg('--impulse-at', 8)             # later = the response starts later in the capture
         fracs = list(range(0, 0x4000, step))
         if '--phases' in sys.argv:               # a list of fractions, one per line (make_srctab.py --todo)
             fracs = [int(x, 0) for x in open(arg('--phases', None, str)).read().split()]
         outs, dbufs = [], []
         quiet = Log(os.devnull)
         for f in fracs:
-            setup(bar, quiet, f, wing, ratio, amp=amp)
+            setup(bar, quiet, f, wing, ratio, amp=amp, impulse_at=imp)
             for attempt in range(4):            # a capture that lost or doubled a sample does not sum
                 r, o, d = flush_and_read(bar, quiet, flush=False)   # to the impulse: take it again
                 clear(bar, quiet)
                 if abs(sum(r) - amp) <= 8 and not any(r[:2]):   # whole, and caught from the start
                     break
-                setup(bar, quiet, f, wing, ratio, amp=amp)
+                setup(bar, quiet, f, wing, ratio, amp=amp, impulse_at=imp)
             r = (r + [0] * 160)[:160]
             outs.append(r); dbufs.append(o)
             log(event='sweep_point', frac=f, peak=max(r, key=abs), nonzero=[(i, x) for i, x in enumerate(r) if x])

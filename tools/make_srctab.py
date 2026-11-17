@@ -3,10 +3,9 @@
 
   ./make_srctab.py OUT.npz [--header HEADER.h] [--todo PHASES.txt] SWEEP.npz [SWEEP.npz ...]
 
-1. Align each phase's capture to the Kaiser fit (beta 7.70, half-width 12.85) on the taps a
-   capture gets right (the first 22; the last four can overlap the impulse's next pass through
-   the converter's 32-entry FIFO). Captures that do not sum to the impulse (16384 +-8) or sit
-   more than 5 LSB from the fit are dropped.
+1. Align each phase's capture to the Kaiser fit (beta 7.70, half-width 12.85), reading it
+   circularly (see align). Windows that do not sum to the impulse (16384 +-8) or sit more
+   than 5 LSB from the fit at any tap are dropped.
 2. For each tap of each phase, every reading is a vote: the tap itself in every sweep, and its
    mirror (tap 25 - i of phase 16384 - p) in every sweep. The value with the most votes wins;
    a tie goes to the value nearer the fit. Where nothing was read the fit, rounded, fills in
@@ -14,7 +13,8 @@
 3. Keep phases 0-8192, replace isolated capture spikes (second difference along the phase of 3
    or more) by the mean of their neighbours ('smoothed'), and write the table, the 86Box header
    snd_vortex2_srctab.h (deltas along the phase, two per character) and, with --todo, the
-   fractions still worth measuring (each filled or smoothed phase and its mirror), for
+   fractions still worth measuring (each phase with a value filled, smoothed or without a
+   clear majority of readings, and its mirror), for
    'srcprobe.py sweep --phases'.
 """
 import sys
@@ -33,25 +33,41 @@ def kaiser(f):
 
 
 def align(path, K):
+    """The converter's input is a 32-entry ring, so an impulse's response repeats every 32
+    outputs: the 26 taps and then six zeros. A capture that starts after the first taps came out
+    still has them, 32 outputs later (the outer taps of 88 phases had been lost that way), and
+    a capture's first outputs sometimes read 0 where their copy 32 later holds the value. Each row is read circularly: a tap's value is the one non-zero reading among its
+    output and the copies 32 before and after (0 if all are 0; dropped if they disagree). A window is aligned on its 18 middle taps (all
+    within 5 of the fit, which rejects the captures where two neighbouring outputs came out
+    swapped); each outer tap is then kept if it too is within 5 of the fit."""
     d = np.load(path)
     R, F = d['response'].astype(np.int64), d['fracs'].astype(int)
-    core = np.arange(26) < 22
     T = np.full((N, 26), INV, dtype=np.int64)
+    mid = slice(4, 22)
     for r, f in zip(R, F):
-        if abs(r.sum() - 16384) > 8:
-            continue
-        rp = np.r_[np.full(30, INV), r]
         best = None
-        for s in range(len(rp) - 25):
-            w = rp[s:s + 26][::-1]              # outputs come out with the tap index falling
-            known = (w != INV) & core
-            if known.sum() >= 12:
-                e = np.abs(w[known] - K[f][known]).max()
-                if best is None or e < best[0]:
-                    best = (e, s)
-        if best and best[0] <= 5:
-            row = rp[best[1]:best[1] + 26][::-1]
-            T[f] = np.where(core, row, INV)
+        for s in range(-26, len(r) - 26):
+            idx = np.arange(s, s + 26)
+            idx = np.where(idx < 0, idx + 32, idx)
+            if idx.max() >= len(r):
+                continue
+            w = r[idx][::-1]                       # outputs come out with the tap index falling
+            e = np.abs(w[mid] - K[f][mid]).max()   # aligned on the 18 middle taps
+            if best is None or e < best[0]:
+                best = (e, w, s)
+        if not best or best[0] > 5:
+            continue
+        s0 = best[2]
+        w = np.full(26, INV, dtype=np.int64)
+        for k in range(26):                        # each tap from the copy that holds it
+            i = s0 + 25 - k                        # output index of tap k (taps come out falling)
+            vals = {int(r[j]) for j in (i, i + 32, i - 32) if 0 <= j < len(r) and r[j]}
+            if len(vals) == 1:
+                w[k] = vals.pop()
+            elif not vals:
+                w[k] = 0
+        ok = (w != INV) & (np.abs(w - K[f]) <= 5)  # each outer tap kept on its own merits
+        T[f] = np.where(ok, w, INV)
     return T
 
 
@@ -101,7 +117,8 @@ def main():
     np.savez_compressed(out_path, table=H.astype(np.int16), model_filled=filled, smoothed=smoothed,
                         votes=votes, agree=agree)
     if '--todo' in opt:
-        ph = sorted({q for p in np.where((filled | smoothed).any(1))[0] for q in (int(p), (N - int(p)) % N)})
+        weak = (votes > 0) & (agree * 2 <= votes)      # no clear majority among the readings
+        ph = sorted({q for p in np.where((filled | smoothed | weak).any(1))[0] for q in (int(p), (N - int(p)) % N)})
         open(opt['--todo'], 'w').write('\n'.join(f'{q:#06x}' for q in ph) + '\n')
         print(f'{len(ph)} fractions written to {opt["--todo"]}')
     if '--header' in opt:

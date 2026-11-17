@@ -220,24 +220,37 @@ def flush_and_read(bar, log, reads=0, gap=0.0, flush=True):
     # word 0 of its double buffer, one sample per tick, and FIFO b stays empty; so read only the
     # pointer word and that word, in a tight loop (a few microseconds per pass against 20.8 us per
     # sample), and keep one value per read-pointer position.
-    PAR6, DB0 = SRC_CHANNEL_PARAMS[6] + 4 * k, SRC_OUTPUT_DOUBLE_BUFFER + 8 * k
+    # Sweep 1: each value sat in word 0 for two samples and the values were every other output
+    # (they summed to half the impulse), so the two words take alternate outputs: read both.
+    PAR6, DB0, DB1 = SRC_CHANNEL_PARAMS[6] + 4 * k, SRC_OUTPUT_DOUBLE_BUFFER + 8 * k, SRC_OUTPUT_DOUBLE_BUFFER + 8 * k + 4
     rd = bar.rd
-    seq, raw = {}, []
+    raw = []
     t0 = time.perf_counter()
     while time.perf_counter() - t0 < 0.003:
-        p6 = rd(PAR6); v = rd(DB0)
-        raw.append((p6, v))
-    for p6, v in raw:
-        seq.setdefault((p6 >> 8) & 0xff, s16(v & 0xffff))   # first value seen at each position
-    order = []
-    for p6, v in raw:
+        raw.append((rd(PAR6), rd(DB0), rd(DB1)))
+    order, seen = [], {}
+    for p6, v0, v1 in raw:
         rp = (p6 >> 8) & 0xff
         if not order or order[-1] != rp:
-            order.append(rp)
-    response = [seq[rp] for rp in order]
+            order.append(rp); seen[len(order) - 1] = (s16(v0 & 0xffff), s16(v1 & 0xffff))
+    # at each position one word holds the newest output: the one that changed from the position before
+    response, words = [], []
+    for i in range(len(order)):
+        w0, w1 = seen[i]
+        if i == 0:
+            response.append(w0); words.append(0); continue
+        p0, p1 = seen[i - 1]
+        if w0 != p0 and w1 == p1:
+            response.append(w0); words.append(0)
+        elif w1 != p1 and w0 == p0:
+            response.append(w1); words.append(1)
+        else:                                   # both or neither changed: go by alternation
+            wi = 1 - words[-1]
+            response.append(w1 if wi else w0); words.append(wi)
     steps = [(order[i + 1] - order[i]) & 0xff for i in range(len(order) - 1)]
     log(event='capture', passes=len(raw), positions=len(order), missed=sum(x - 1 for x in steps if x > 1),
-        nonzero=[(i, x) for i, x in enumerate(response) if x])
+        nonzero=[(i, x) for i, x in enumerate(response) if x], total=sum(response),
+        both=[seen[i] for i in range(len(order)) if seen[i] != (0, 0)][:64])
     time.sleep(0.005)
     out = [s16(x) for x in window(bar, FIFO_VDB_CHANNEL_DATA + 0x100 * b, 64)]
     dbuf = [s16(x) for x in window(bar, SRC_OUTPUT_DOUBLE_BUFFER + 8 * k, 2)]

@@ -27,6 +27,10 @@ Run on the X79 host with the card bound to vfio-pci and no VM running, like srcp
   sudo ./wtprobe.py reso [--out FILE.npz]   the filter's feedback (resonance) word: impulse and step
                                              responses at four cut-offs and 16 feedback values
                                              (about 30 s)
+  sudo ./wtprobe.py ramp [--out FILE.npz]   the attack and smooth-mute ramps (Aureal's description, relayed by
+                                             the map's author): a smooth mute at five mute-ramp settings, then an
+                                             attack from hard mute at each candidate state code, slope and attack-
+                                             ramp setting, each watched for 0.4 s (about a minute)
   sudo ./wtprobe.py clear
 
 The chain: a second-half voice (global 40, local 8) with DSREG clear, so it plays onto its half's
@@ -45,6 +49,7 @@ the FIFO control word valid with its DMA pointer ahead of its read pointer, as f
 in srcprobe. Every write is logged with its readback.
 """
 import importlib.util
+import json
 import os
 import sys
 import time
@@ -193,9 +198,105 @@ def capture_mix(bar, log, source, via_mixer, level=0x1000, in_gain=0x08):
     return (sum(seg) / len(seg) if seg else 0.0), r
 
 
+# ---------------------------------------------------------------- ramps
+WT_MRAMP, WT_GMODE, WT_ARAMP = BANK + 0xc, BANK + 0x10, BANK + 0x14
+WT_MUTE = BANK + 0x100 + LV * 4               # ALSA: one word per voice; the description: one bit per voice
+DRV_MRAMP, DRV_ARAMP = 0x10000000, 0x00830000  # the driver's values, written once at start-up
+
+
+def long_capture(bar, dur, trig_at, trigger):
+    """Watch the converter's output and the voice's registers for dur seconds; call trigger()
+    trig_at seconds in. The voice and the chain must already be set up; the VDB rate is enabled
+    here. Output samples are rebuilt from the double buffer as in srcprobe.flush_and_read, each
+    with the time it was seen (a few may be missed when the host is busy; the times show where)."""
+    k = sp.SRC_K
+    PAR6, DB0, DB1 = sp.SRC_CHANNEL_PARAMS[6] + 4 * k, sp.SRC_OUTPUT_DOUBLE_BUFFER + 8 * k, sp.SRC_OUTPUT_DOUBLE_BUFFER + 8 * k + 4
+    watch = {'parm0': WT_PARM, 'parm1': WT_PARM + 4, 'parm2': WT_PARM + 8, 'parm3': WT_PARM + 12,
+             'mute': WT_MUTE, 'mute0': BANK + 0x100, 'gmode': WT_GMODE, 'run': WT_RUN}
+    names, addrs = list(watch), list(watch.values())
+    rd = bar.rd
+    raw, regs, last = [], [], None
+    bar.wr(sp.VDB_ACTIVE_SR, rd(sp.VDB_ACTIVE_SR) | (1 << sp.RATE))
+    t0 = time.perf_counter()
+    fired, t_fire = False, None
+    n_pass = 0
+    while True:
+        t = time.perf_counter() - t0
+        if t > dur:
+            break
+        if not fired and t >= trig_at:
+            trigger(); fired, t_fire = True, t
+        raw.append((t, rd(PAR6), rd(DB0), rd(DB1)))
+        n_pass += 1
+        if n_pass & 7:                        # the registers every 8th pass, so the samples keep up
+            continue
+        cur = tuple(rd(a) for a in addrs)
+        if cur != last:
+            regs.append((round(t * 1e6), {n: hex(v) for n, v, o in zip(names, cur, last or [None] * len(cur)) if v != o}))
+            last = cur
+    out, prev, pw = [], None, 1
+    prp = None
+    for t, p6, v0, v1 in raw:
+        rp = (p6 >> 8) & 0xff
+        if rp == prp:
+            continue
+        w0, w1 = sp.s16(v0 & 0xffff), sp.s16(v1 & 0xffff)
+        if prev is None:
+            val, pw = w0, 0
+        elif w0 != prev[0] and w1 == prev[1]:
+            val, pw = w0, 0
+        elif w1 != prev[1] and w0 == prev[0]:
+            val, pw = w1, 1
+        else:
+            pw = 1 - pw; val = w1 if pw else w0
+        out.append((t, rp, val))
+        prev, prp = (w0, w1), rp
+    return out, regs, t_fire
+
+
+def ramp_case(bar, log, name, before, trigger, dur=0.4, trig_at=0.02, mramp=DRV_MRAMP, aramp=DRV_ARAMP):
+    """before(): writes after the voice is set up and playing, before the capture."""
+    sp.SRC_FEED = ALL['ds_left']
+    sp.setup(bar, log, 0, 13, 0x4000, pattern=[0] * 64)
+    voice_setup(bar, log, 0, 0x7f, 0x7f, ds=True, level=0x1000)
+    bar.wr(WT_MRAMP, mramp); bar.wr(WT_ARAMP, aramp)
+    bar.wr(WT_MUTE, 0); bar.wr(BANK + 0x100, 0)
+    voice_go(bar)
+    before()
+    out, regs, t_fire = long_capture(bar, dur, trig_at, trigger)
+    voice_stop(bar, log)
+    sp.clear(bar, log)
+    bar.wr(WT_MRAMP, DRV_MRAMP); bar.wr(WT_ARAMP, DRV_ARAMP)
+    return out, regs, t_fire
+
+
+def ramp_summary(out, t_fire):
+    """Level before the trigger, and the times (ms after it) the output crossed 10/50/90% of the
+    way to its final level, from samples averaged in 0.5 ms bins."""
+    if not out:
+        return {}
+    pre = [v for t, _, v in out if t < t_fire]
+    post = [(t - t_fire, v) for t, _, v in out if t >= t_fire]
+    a = sum(pre[-40:]) / max(1, len(pre[-40:]))
+    tail = [v for _, v in post[-200:]]
+    b = sum(tail) / max(1, len(tail))
+    bins = {}
+    for t, v in post:
+        bins.setdefault(int(t / 0.0005), []).append(v)
+    xs = sorted((k * 0.5, sum(v) / len(v)) for k, v in bins.items())
+    cross = {}
+    for f in (0.1, 0.5, 0.9):
+        th = a + (b - a) * f
+        for ms, v in xs:
+            if (b >= a and v >= th) or (b < a and v <= th):
+                cross[f'{int(f * 100)}%'] = ms
+                break
+    return {'before': round(a, 1), 'after': round(b, 1), 'cross_ms': cross, 'samples': len(out)}
+
+
 def main():
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
-    if cmd not in ('start', 'bus', 'sweep', 'levels', 'gains', 'state', 'mix', 'own', 'reso', 'clear'):
+    if cmd not in ('start', 'bus', 'sweep', 'levels', 'gains', 'state', 'mix', 'own', 'reso', 'ramp', 'clear'):
         sys.exit(__doc__)
     if sp.vm_running():
         sys.exit('a QEMU process is running; stop the VM first (this needs the card idle)')
@@ -356,6 +457,57 @@ def main():
         path = sp.arg('--out', 'wtprobe-reso.npz', str)
         np.savez(path, rows=np.array(rows))
         log(event='saved', path=path)
+    elif cmd == 'ramp':
+        # Smooth mute: a voice playing at gain 0xcf, state 7, then 1 written to its mute word
+        # (ALSA's layout) or to its bit in voice 0's word (the description's 'one bit per voice').
+        # The description says the voice ends in HARD_MUTE with its mute bit cleared: the state
+        # code it ends in is then the starting state for the attacks.
+        # Attack: from that state, PARM0 (base) and PARM1 (target) with equal pitch and cut-off and
+        # bit 0 (the bit the driver sets in PARM1 only) 0; PARM0's gain byte is the attack field
+        # (phase 0, slope in bits 2-0), PARM1's the target gain 0xcf; then each candidate code in
+        # PARM3's gain-state field. Slopes 0-7 at the driver's attack-ramp word, then three other
+        # attack-ramp words, and three mute-ramp words, to decode the two period registers.
+        import numpy as np
+        mute_others(bar, log)
+        caps, meta = [], []
+        def keep(name, res, **kw):
+            out, regs, tf = res
+            summ = ramp_summary(out, tf)
+            log(event='ramp', case=name, **kw, **summ, regs=regs[:60])
+            meta.append(dict(case=name, **kw, t_fire=tf))
+            caps.append(np.array([(round(t * 1e6), rp, v) for t, rp, v in out], dtype=np.int32))
+            return regs
+        hard = None
+        for mramp in (DRV_MRAMP, 0x08000000, 0x20000000, 0x01000000, 0x00100000, 0x10000010):
+            regs = keep('mute (word)', ramp_case(bar, quiet, 'mute', lambda: None, lambda: bar.wr(WT_MUTE, 1), mramp=mramp),
+                        mramp=hex(mramp))
+            p3 = [r[1]['parm3'] for r in regs if 'parm3' in r[1]]
+            if p3 and hard is None:
+                hard = (int(p3[-1], 16) >> 21) & 7
+        keep('mute (bit in voice 0 word)', ramp_case(bar, quiet, 'mute', lambda: None,
+             lambda: bar.wr(BANK + 0x100, 1 << LV)), mramp=hex(DRV_MRAMP))
+        hard = 0 if hard is None or hard == 7 else hard
+        log(event='hard_mute_state', state=hard)
+
+        def attack(state, slope, bit0=0, target=0xcf):
+            def before():
+                bar.wr(WT_PARM + 12, (0xcf << 24) | (hard << 21))
+                bar.wr(WT_PARM + 0, (0xcf << 24) | (slope << 16) | 0xa000)
+                bar.wr(WT_PARM + 4, (0xcf << 24) | (target << 16) | 0xa000 | bit0)
+            return before, lambda: bar.wr(WT_PARM + 12, (0xcf << 24) | (state << 21))
+        cands = [s for s in range(1, 8) if s != hard]
+        for st in cands:
+            for slope in range(8):
+                b, t = attack(st, slope)
+                keep('attack', ramp_case(bar, quiet, 'attack', b, t), state=st, slope=slope, aramp=hex(DRV_ARAMP))
+            b, t = attack(st, 4, bit0=1)
+            keep('attack, PARM1 bit 0 set (as the driver)', ramp_case(bar, quiet, 'attack', b, t), state=st, slope=4, aramp=hex(DRV_ARAMP))
+            for ar in (0x00410000, 0x01060000, 0x00830080, 0x00030000):
+                b, t = attack(st, 4)
+                keep('attack', ramp_case(bar, quiet, 'attack', b, t, aramp=ar), state=st, slope=4, aramp=hex(ar))
+        path = sp.arg('--out', 'wtprobe-ramp.npz', str)
+        np.savez_compressed(path, meta=np.array([json.dumps(m) for m in meta]), **{f'c{i}': c for i, c in enumerate(caps)})
+        log(event='saved', path=path, captures=len(caps))
     elif cmd == 'clear':
         mix_clear(bar, log)
         voice_stop(bar, log)

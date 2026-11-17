@@ -1,0 +1,77 @@
+{"event": "start", "cmd": "gains", "argv": ["gains", "--out", "/home/z2k-retro/wtgains.npz", "--log", "/home/z2k-retro/wtgains.jsonl"], "chip_ctrl": "0x103260", "utc": "2026-11-17T14:10:20.059460Z"}
+{"event": "muted_others", "utc": "2026-11-17T14:10:20.111884Z"}
+{"event": "gain", "which": "gain", "code": "0xcf", "level": [6500.0, 6500.0, 6500.0], "utc": "2026-11-17T14:10:20.122201Z"}
+{"event": "gain", "which": "gain", "code": "0xce", "level": [6284.0, 6284.0, 6284.0], "utc": "2026-11-17T14:10:20.132394Z"}
+{"event": "gain", "which": "gain", "code": "0xcc", "level": [5850.0, 5850.0, 5850.0], "utc": "2026-11-17T14:10:20.142533Z"}
+{"event": "gain", "which": "gain", "code": "0xc8", "level": [4984.0, 4984.0, 4984.0], "utc": "2026-11-17T14:10:20.152669Z"}
+{"event": "gain", "which": "gain", "code": "0xc0", "level": [3250.0, 3250.0, 3250.0], "utc": "2026-11-17T14:10:20.162851Z"}
+{"event": "gain", "which": "gain", "code": "0xbf", "level": [3250.0, 3250.0, 3250.0], "utc": "2026-11-17T14:10:20.173226Z"}
+{"event": "gain", "which": "gain", "code": "0xb8", "level": [2492.0, 2492.0, 2492.0], "utc": "2026-11-17T14:10:20.183636Z"}
+{"event": "gain", "which": "gain", "code": "0xb0", "level": [1625.0, 1625.0, 1625.0], "utc": "2026-11-17T14:10:20.194136Z"}
+{"event": "gain", "which": "gain", "code": "0xaf", "level": [1625.0, 1625.0, 1625.0], "utc": "2026-11-17T14:10:20.204727Z"}
+{"event": "gain", "which": "gain", "code": "0xa0", "level": [812.0, 812.0, 812.0], "utc": "2026-11-17T14:10:20.215419Z"}
+{"event": "gain", "which": "gain", "code": "0x9f", "level": [812.0, 812.0, 812.0], "utc": "2026-11-17T14:10:20.226275Z"}
+{"event": "gain", "which": "gain", "code": "0x90", "level": [406.0, 406.0, 406.0], "utc": "2026-11-17T14:10:20.237209Z"}
+{"event": "gain", "which": "gain", "code": "0x80", "level": [203.0, 203.0, 203.0], "utc": "2026-11-17T14:10:20.248199Z"}
+{"event": "gain", "which": "gain", "code": "0x70", "level": [101.0, 101.0, 101.0], "utc": "2026-11-17T14:10:20.259322Z"}
+{"event": "gain", "which": "gain", "code": "0x60", "level": [50.0, 50.0, 50.0], "utc": "2026-11-17T14:10:20.270556Z"}
+{"event": "gain", "which": "gain", "code": "0x40", "level": [12.0, 12.0, 12.0], "utc": "2026-11-17T14:10:20.281884Z"}
+{"event": "gain", "which": "gain", "code": "0x20", "level": [3.0, 3.0, 3.0], "utc": "2026-11-17T14:10:20.293212Z"}
+{"event": "gain", "which": "gain", "code": "0x10", "level": [1.0, 1.0, 1.0], "utc": "2026-11-17T14:10:20.304643Z"}
+{"event": "gain", "which": "gain", "code": "0x8", "level": [0.0, 0.0, 0.0], "utc": "2026-11-17T14:10:20.316108Z"}
+{"event": "gain", "which": "gain", "code": "0x1", "level": [0.0, 0.0, 0.0], "utc": "2026-11-17T14:10:20.327588Z"}
+{"event": "gain", "which": "gain", "code": "0x0", "level": [0.0, 0.0, 0.0], "utc": "2026-11-17T14:10:20.339169Z"}
+{"event": "gain", "which": "gain", "code": "0xd0", "level": [3682.0, 3682.0, 3682.0], "utc": "2026-11-17T14:10:20.350990Z"}
+{"event": "gain", "which": "gain", "code": "0xdf", "level": [6500.0, 6500.0, 6500.0], "utc": "2026-11-17T14:10:20.363015Z"}
+{"event": "gain", "which": "gain", "code": "0xe0", "level": [4113.0, 4113.0, 4113.0], "utc": "2026-11-17T14:10:20.375210Z"}
+{"event": "gain", "which": "gain", "code": "0xef", "level": [6500.0, 6500.0, 6500.0], "utc": "2026-11-17T14:10:20.387536Z"}
+{"event": "gain", "which": "gain", "code": "0xff", "level": [6500.0, 6500.0, 6500.0], "utc": "2026-11-17T14:10:20.399993Z"}
+{"event": "gain", "which": "ingain", "code": "0xcf", "level": [6500.0, 6500.0, 6500.0], "utc": "2026-11-17T14:10:20.412393Z"}
+{"event": "gain", "which": "ingain", "code": "0xce", "level": [6284.0, 6284.0, 6284.0], "utc": "2026-11-17T14:10:20.425098Z"}
+{"event": "gain", "which": "ingain", "code": "0xcc", "level": [5850.0, 5850.0, 5850.0], "utc": "2026-11-17T14:10:20.437753Z"}
+{"event": "gain", "which": "ingain", "code": "0xc8", "level": [4984.0, 4984.0, 4984.0], "utc": "2026-11-17T14:10:20.450470Z"}
+{"event": "gain", "which": "ingain", "code": "0xc0", "level": [3250.0, 3250.0, 3250.0], "utc": "2026-11-17T14:10:20.463392Z"}
+{"event": "gain", "which": "ingain", "code": "0xbf", "level": [3250.0, 3250.0, 3250.0], "utc": "2026-11-17T14:10:20.476338Z"}
+{"event": "gain", "which": "ingain", "code": "0xb8", "level": [2492.0, 2492.0, 2492.0], "utc": "2026-11-17T14:10:20.489362Z"}
+{"event": "gain", "which": "ingain", "code": "0xb0", "level": [1625.0, 1625.0, 1625.0], "utc": "2026-11-17T14:10:20.502593Z"}
+{"event": "gain", "which": "ingain", "code": "0xaf", "level": [1624.0, 1624.0, 1624.0], "utc": "2026-11-17T14:10:20.515903Z"}
+{"event": "gain", "which": "ingain", "code": "0xa0", "level": [812.0, 812.0, 812.0], "utc": "2026-11-17T14:10:20.529195Z"}
+{"event": "gain", "which": "ingain", "code": "0x9f", "level": [812.0, 812.0, 812.0], "utc": "2026-11-17T14:10:20.542524Z"}
+{"event": "gain", "which": "ingain", "code": "0x90", "level": [406.0, 406.0, 406.0], "utc": "2026-11-17T14:10:20.556133Z"}
+{"event": "gain", "which": "ingain", "code": "0x80", "level": [203.0, 203.0, 203.0], "utc": "2026-11-17T14:10:20.569684Z"}
+{"event": "gain", "which": "ingain", "code": "0x70", "level": [101.0, 101.0, 101.0], "utc": "2026-11-17T14:10:20.583286Z"}
+{"event": "gain", "which": "ingain", "code": "0x60", "level": [50.0, 50.0, 50.0], "utc": "2026-11-17T14:10:20.597070Z"}
+{"event": "gain", "which": "ingain", "code": "0x40", "level": [12.0, 12.0, 12.0], "utc": "2026-11-17T14:10:20.611003Z"}
+{"event": "gain", "which": "ingain", "code": "0x20", "level": [2.0, 2.0, 2.0], "utc": "2026-11-17T14:10:20.624643Z"}
+{"event": "gain", "which": "ingain", "code": "0x10", "level": [1.0, 1.0, 1.0], "utc": "2026-11-17T14:10:20.638617Z"}
+{"event": "gain", "which": "ingain", "code": "0x8", "level": [0.0, 0.0, 0.0], "utc": "2026-11-17T14:10:20.652350Z"}
+{"event": "gain", "which": "ingain", "code": "0x1", "level": [0.0, 0.0, 0.0], "utc": "2026-11-17T14:10:20.666203Z"}
+{"event": "gain", "which": "ingain", "code": "0x0", "level": [0.0, 0.0, 0.0], "utc": "2026-11-17T14:10:20.679939Z"}
+{"event": "gain", "which": "ingain", "code": "0xd0", "level": [3682.0, 3682.0, 3682.0], "utc": "2026-11-17T14:10:20.693998Z"}
+{"event": "gain", "which": "ingain", "code": "0xdf", "level": [6500.0, 6500.0, 6500.0], "utc": "2026-11-17T14:10:20.708058Z"}
+{"event": "gain", "which": "ingain", "code": "0xe0", "level": [4113.0, 4113.0, 4113.0], "utc": "2026-11-17T14:10:20.722113Z"}
+{"event": "gain", "which": "ingain", "code": "0xef", "level": [6500.0, 6500.0, 6500.0], "utc": "2026-11-17T14:10:20.736173Z"}
+{"event": "gain", "which": "ingain", "code": "0xff", "level": [6500.0, 6500.0, 6500.0], "utc": "2026-11-17T14:10:20.750205Z"}
+{"event": "ds_pan", "pan": "0x0", "bus": "ds_left", "level": [6500.0, 6500.0, 6500.0], "utc": "2026-11-17T14:10:20.764261Z"}
+{"event": "ds_pan", "pan": "0x0", "bus": "ds_right", "level": [0.0, 0.0, 0.0], "utc": "2026-11-17T14:10:20.778021Z"}
+{"event": "ds_pan", "pan": "0x3f", "bus": "ds_left", "level": [3276.0, 3276.0, 3276.0], "utc": "2026-11-17T14:10:20.792037Z"}
+{"event": "ds_pan", "pan": "0x3f", "bus": "ds_right", "level": [3224.0, 3224.0, 3224.0], "utc": "2026-11-17T14:10:20.806088Z"}
+{"event": "ds_pan", "pan": "0x40", "bus": "ds_left", "level": [3224.0, 3224.0, 3224.0], "utc": "2026-11-17T14:10:20.820121Z"}
+{"event": "ds_pan", "pan": "0x40", "bus": "ds_right", "level": [3276.0, 3276.0, 3276.0], "utc": "2026-11-17T14:10:20.834168Z"}
+{"event": "ds_pan", "pan": "0x7f", "bus": "ds_left", "level": [0.0, 0.0, 0.0], "utc": "2026-11-17T14:10:20.847923Z"}
+{"event": "ds_pan", "pan": "0x7f", "bus": "ds_right", "level": [6500.0, 6500.0, 6500.0], "utc": "2026-11-17T14:10:20.861980Z"}
+{"event": "others_muted", "bus": "left", "level": [0.0, 0.0, 0.0], "utc": "2026-11-17T14:10:20.875747Z"}
+{"event": "others_muted", "bus": "right", "level": [0.0, 0.0, 0.0], "utc": "2026-11-17T14:10:20.889485Z"}
+{"event": "others_muted", "bus": "reverb", "level": [0.0, 0.0, 0.0], "utc": "2026-11-17T14:10:20.903230Z"}
+{"event": "others_muted", "bus": "chorus", "level": [0.0, 0.0, 0.0], "utc": "2026-11-17T14:10:20.916976Z"}
+{"event": "saved", "path": "/home/z2k-retro/wtgains.npz", "utc": "2026-11-17T14:10:20.942929Z"}
+{"event": "start", "cmd": "clear", "argv": ["clear", "--log", "/home/z2k-retro/wtgains.jsonl"], "chip_ctrl": "0x103260", "utc": "2026-11-17T14:10:21.059209Z"}
+{"event": "write", "what": "wt fifo: off", "addr": "0x160a0", "old": "0x140", "wrote": "0x0", "readback": "0x0", "utc": "2026-11-17T14:10:21.059364Z"}
+{"event": "write", "what": "PARM3: hard mute", "addr": "0x828c", "old": "0x0", "wrote": "0x0", "readback": "0x0", "utc": "2026-11-17T14:10:21.059432Z"}
+{"event": "write", "what": "vdb rate off", "addr": "0x28400", "old": "0x0", "wrote": "0x0", "readback": "0x0", "utc": "2026-11-17T14:10:21.059496Z"}
+{"event": "write", "what": "src rate off", "addr": "0x26cc0", "old": "0x0", "wrote": "0x0", "readback": "0x0", "utc": "2026-11-17T14:10:21.059556Z"}
+{"event": "write", "what": "src hdr: none", "addr": "0x26c84", "old": "0x0", "wrote": "0x0", "readback": "0x0", "utc": "2026-11-17T14:10:21.059612Z"}
+{"event": "write", "what": "vdb hdr: none", "addr": "0x282f8", "old": "0xffff", "wrote": "0xffff", "readback": "0xffff", "utc": "2026-11-17T14:10:21.059666Z"}
+{"event": "write", "what": "vdb link: none", "addr": "0x28100", "old": "0xffff", "wrote": "0xffff", "readback": "0xffff", "utc": "2026-11-17T14:10:21.059731Z"}
+{"event": "write", "what": "fifo a: off", "addr": "0x16100", "old": "0x0", "wrote": "0x0", "readback": "0x0", "utc": "2026-11-17T14:10:21.059789Z"}
+{"event": "write", "what": "fifo b: off", "addr": "0x16104", "old": "0x0", "wrote": "0x0", "readback": "0x0", "utc": "2026-11-17T14:10:21.059842Z"}

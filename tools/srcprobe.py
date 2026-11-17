@@ -7,7 +7,7 @@ then idle and nothing else writes to it). Nothing here needs a guest or a driver
   sudo ./srcprobe.py ram   [--log FILE]           stage 1: which RAMs take host writes, and how
                                                   the converter FIFOs are split between channels
   sudo ./srcprobe.py run   [--frac F] [--wing W] [--ratio R] [--alias] [--rate N] [--dmaptr P]
-                           [--noflush] [--log FILE]
+                           [--flush] [--log FILE]
                                                   stage 2: one pass: route FIFO -> SRC -> FIFO,
                                                   preload an impulse, enable, flush, read back
                                                   (--alias: send the output to FIFO b's alias)
@@ -216,26 +216,35 @@ def flush_and_read(bar, log, reads=0, gap=0.0, flush=True):
     if flush:
         pc = bar.rd(FIFO_VDB_CHANNEL_PC + 4 * a)
         w(bar, log, FIFO_VDB_CHANNEL_PC + 4 * a, (pc & 0x3fffff) | PC_FLUSH, 'fifo a: flush')
-    # watch for 3 ms (about 144 samples at 48 kHz); keep only the readings that changed, so the
-    # double buffer's 2 words are seen at every output the converter makes
-    snaps, last = [], None
+    # watch for 3 ms (about 144 samples at 48 kHz). Run 5: the converter's output appears in
+    # word 0 of its double buffer, one sample per tick, and FIFO b stays empty; so read only the
+    # pointer word and that word, in a tight loop (a few microseconds per pass against 20.8 us per
+    # sample), and keep one value per read-pointer position.
+    PAR6, DB0 = SRC_CHANNEL_PARAMS[6] + 4 * k, SRC_OUTPUT_DOUBLE_BUFFER + 8 * k
+    rd = bar.rd
+    seq, raw = {}, []
     t0 = time.perf_counter()
     while time.perf_counter() - t0 < 0.003:
-        cur = (bar.rd(SRC_CHANNEL_PARAMS[6] + 4 * k), bar.rd(SRC_OUTPUT_DOUBLE_BUFFER + 8 * k) & 0xffff,
-               bar.rd(SRC_OUTPUT_DOUBLE_BUFFER + 8 * k + 4) & 0xffff, bar.rd(FIFO_VDB_CHANNEL_PC + 4 * a),
-               bar.rd(FIFO_VDB_CHANNEL_PC + 4 * b))
-        if cur != last:
-            snaps.append({'t_us': round((time.perf_counter() - t0) * 1e6), 'params6': hex(cur[0]),
-                          'dbuf': [s16(cur[1]), s16(cur[2])], 'pc_in': hex(cur[3]), 'pc_out': hex(cur[4])})
-            last = cur
+        p6 = rd(PAR6); v = rd(DB0)
+        raw.append((p6, v))
+    for p6, v in raw:
+        seq.setdefault((p6 >> 8) & 0xff, s16(v & 0xffff))   # first value seen at each position
+    order = []
+    for p6, v in raw:
+        rp = (p6 >> 8) & 0xff
+        if not order or order[-1] != rp:
+            order.append(rp)
+    response = [seq[rp] for rp in order]
+    steps = [(order[i + 1] - order[i]) & 0xff for i in range(len(order) - 1)]
+    log(event='capture', passes=len(raw), positions=len(order), missed=sum(x - 1 for x in steps if x > 1),
+        nonzero=[(i, x) for i, x in enumerate(response) if x])
     time.sleep(0.005)
     out = [s16(x) for x in window(bar, FIFO_VDB_CHANNEL_DATA + 0x100 * b, 64)]
     dbuf = [s16(x) for x in window(bar, SRC_OUTPUT_DOUBLE_BUFFER + 8 * k, 2)]
     sin = [s16(x) for x in window(bar, SRC_INPUT_FIFO + 0x80 * k, 32)]
-    log(event='snapshots', snaps=snaps)
     log(event='result', fifo_out=out, src_output_double_buffer=dbuf, src_input_fifo=sin)
     log(event='after', regs=regs(bar))
-    return out, dbuf, sin
+    return response, out, dbuf
 
 
 def clear(bar, log):
@@ -324,7 +333,7 @@ def main():
         stage_ram(bar, log)
     elif cmd == 'run':
         setup(bar, log, arg('--frac', 0), wing, ratio, dmaptr=arg('--dmaptr', 32))
-        flush_and_read(bar, log, flush='--noflush' not in sys.argv)
+        flush_and_read(bar, log, flush='--flush' in sys.argv)
         clear(bar, log)
     elif cmd == 'sweep':
         import numpy as np
@@ -334,12 +343,13 @@ def main():
         quiet = Log(os.devnull)
         for f in fracs:
             setup(bar, quiet, f, wing, ratio)
-            o, d, _ = flush_and_read(bar, quiet, reads=4)
+            r, o, d = flush_and_read(bar, quiet, flush=False)
             clear(bar, quiet)
-            outs.append(o); dbufs.append(d)
-            log(event='sweep_point', frac=f, peak=max(o, key=abs), nonzero=sum(1 for x in o if x))
+            r = (r + [0] * 160)[:160]
+            outs.append(r); dbufs.append(o)
+            log(event='sweep_point', frac=f, peak=max(r, key=abs), nonzero=[(i, x) for i, x in enumerate(r) if x])
         path = arg('--out', 'srcprobe-sweep.npz', str)
-        np.savez(path, fracs=np.array(fracs), fifo_out=np.array(outs), dbuf=np.array(dbufs), wing=wing, ratio=ratio)
+        np.savez(path, fracs=np.array(fracs), response=np.array(outs), fifo_out=np.array(dbufs), wing=wing, ratio=ratio)
         log(event='saved', path=path, points=len(fracs))
     elif cmd == 'release':
         release(bar, log)

@@ -360,8 +360,12 @@ def main():
         quiet = Log(os.devnull)
         for f in fracs:
             setup(bar, quiet, f, wing, ratio, amp=amp)
-            r, o, d = flush_and_read(bar, quiet, flush=False)
-            clear(bar, quiet)
+            for attempt in range(4):            # a capture that lost or doubled a sample does not sum
+                r, o, d = flush_and_read(bar, quiet, flush=False)   # to the impulse: take it again
+                clear(bar, quiet)
+                if abs(sum(r) - amp) <= 8:
+                    break
+                setup(bar, quiet, f, wing, ratio, amp=amp)
             r = (r + [0] * 160)[:160]
             outs.append(r); dbufs.append(o)
             log(event='sweep_point', frac=f, peak=max(r, key=abs), nonzero=[(i, x) for i, x in enumerate(r) if x])

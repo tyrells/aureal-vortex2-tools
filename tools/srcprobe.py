@@ -26,6 +26,11 @@ The order is the one he gives: program the routes without enabling them, program
 and its work-to-do entry, preload the FIFO, enable the routes' sample rate, then set the FIFO's
 flush bit (bit 21 of its pointer/control word) and read the far end.
 
+The converter set-up values (one-entry work-to-do list with the header's bit 4 clear, throttle
+counter 0x1ff, FIFO target depth 15 with the write pointer preset to 15, wing field 12) are the
+ones Aureal's own Linux core (asp30.o in au88xx 1.1.2, CAsp4Src::SetupChannel and
+CAsp4SrcBlock::AddWTD) writes for a ratio of 1 or below.
+
 Every step's register writes and readbacks go to the JSON log, so a run that does not behave
 still shows where the chain stopped.
 """
@@ -162,18 +167,21 @@ def setup(bar, log, frac, wing, ratio, impulse_at=8, amp=0x4000):
     # 2. the converter and its work-to-do entry on its own rate
     w(bar, log, SRC_ACTIVE_SAMPLE_RATE, bar.rd(SRC_ACTIVE_SAMPLE_RATE) & ~(1 << RATE), 'src rate off')
     w(bar, log, SRC_THROTTLE_SOURCE, bar.rd(SRC_THROTTLE_SOURCE) & ~(1 << k), 'throttle: counter/2')
-    w(bar, log, SRC_THROTTLE_COUNT_SIZE, 512, 'throttle count 512 (48 kHz with /2)')
+    w(bar, log, SRC_THROTTLE_COUNT_SIZE, 0x1ff, 'throttle count 0x1ff (Aureal core default)')
     w(bar, log, SRC_CHANNEL_PARAMS[0] + 4 * k, ((wing - 1) << 4) | k, 'params0: wing, throttle, self')
     w(bar, log, SRC_CHANNEL_PARAMS[1] + 4 * k, ratio, 'params1: 1/ratio 3.14')
     w(bar, log, SRC_CHANNEL_PARAMS[2] + 4 * k, 0, 'params2: drift error 0')
     w(bar, log, SRC_CHANNEL_PARAMS[3] + 4 * k, 0, 'params3: drift last 0')
     w(bar, log, SRC_CHANNEL_PARAMS[4] + 4 * k, frac & 0x3fff, 'params4: time fraction')
     w(bar, log, SRC_CHANNEL_PARAMS[5] + 4 * k, 1, 'params5: drift count 1')
-    w(bar, log, SRC_CHANNEL_PARAMS[6] + 4 * k, 0, 'params6: pointers 0, depth 12, dir out')
-    w(bar, log, SRC_NEXT_CHANNEL + 4 * k, 0, 'src next: end of list')
-    w(bar, log, SRC_SR_HEADER + 4 * RATE, 0x10 | k, 'src hdr: channel k')
+    w(bar, log, SRC_CHANNEL_PARAMS[6] + 4 * k, (1 << 17) | 15, 'params6: depth 15, dir out, write pointer 15 (as Aureal core)')
+    # a one-entry list: the header holds the channel with bit 4 clear (bit 4 = 'next is valid'),
+    # as Aureal's core writes it (CAsp4SrcBlock::AddWTD)
+    w(bar, log, SRC_SR_HEADER + 4 * RATE, k, 'src hdr: channel k, no next')
     for i in range(0x80 // 4):
         bar.wr(SRC_INPUT_FIFO + 0x80 * k + 4 * i, 0)
+    for i in range(0x40 // 4):
+        bar.wr(SRC_OUTPUT_DOUBLE_BUFFER + 0x40 * k + 4 * i, 0)
     # 3. FIFOs: input preloaded with an impulse, output cleared
     for i in range(64):
         bar.wr(FIFO_VDB_CHANNEL_DATA + 0x100 * a + 4 * i, amp if i == impulse_at else 0)

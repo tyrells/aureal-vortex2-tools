@@ -22,6 +22,8 @@ Run on the X79 host with the card bound to vfio-pci and no VM running, like srcp
   sudo ./wtprobe.py mix                      the same constant from an ADB FIFO and from the voice,
                                              straight to the converter and through mixer 0 at unity
                                              (about 10 s)
+  sudo ./wtprobe.py own                      the voice's own ADB source (the A3D-input route) against
+                                             its input, with DSREG, pan and gain varied (about 10 s)
   sudo ./wtprobe.py clear
 
 The chain: a second-half voice (global 40, local 8) with DSREG clear, so it plays onto its half's
@@ -61,7 +63,7 @@ WT_FIFO_PC = 0x16000 + VOICE * 4
 WTDMA_CTRL = 0x27900 + VOICE * 4
 WTDMA_STAT = 0x27d00 + VOICE * 4
 BUSES = {'left': 0xa2, 'right': 0xa3, 'reverb': 0xa4, 'chorus': 0xa5}
-ALL = {'ds_left': 0xa0, 'ds_right': 0xa1, **BUSES}
+ALL = {'ds_left': 0xa0, 'ds_right': 0xa1, **BUSES, 'own': 0x80 + LV}   # own: the voice's own ADB source, which the driver routes to A3D inputs
 LEVEL = 0x4000
 
 
@@ -187,7 +189,7 @@ def capture_mix(bar, log, source, via_mixer, level=0x1000, in_gain=0x08):
 
 def main():
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
-    if cmd not in ('start', 'bus', 'sweep', 'levels', 'gains', 'state', 'mix', 'clear'):
+    if cmd not in ('start', 'bus', 'sweep', 'levels', 'gains', 'state', 'mix', 'own', 'clear'):
         sys.exit(__doc__)
     if sp.vm_running():
         sys.exit('a QEMU process is running; stop the VM first (this needs the card idle)')
@@ -312,6 +314,20 @@ def main():
         for g in (0x00, 0x04, 0x08, 0x0c, 0x10):
             lv, r = capture_mix(bar, quiet, 'adb', True, level=0x1000, in_gain=g)
             log(event='mix_gain', in_gain=hex(g), level=round(lv, 1))
+    elif cmd == 'own':
+        # a voice's own ADB source (0x80 + voice in the second half), the route the driver uses to
+        # feed an A3D source from a wavetable voice when the ADB channels run out (run 11). The
+        # level against the input, with DSREG set and clear and the pan at both ends and centre,
+        # the gain byte at three codes, and the mixed pairs while it is routed.
+        mute_others(bar, log)
+        for ds in (True, False):
+            for pan in (0, 0x3f, 0x7f):
+                for lvl in (0x1000, 0x2000):
+                    lv, r = capture_bus(bar, quiet, 'own', pan, 0x7f, 0x7f, ds=ds, level=lvl)
+                    log(event='own', dsreg=ds, pan=hex(pan), level_in=lvl, level=[round(v, 1) for v in lv])
+        for g in (0xcf, 0xc0, 0xa0):
+            lv, r = capture_bus(bar, quiet, 'own', 0x3f, 0x7f, 0x7f, ds=False, level=0x1000, gain=g)
+            log(event='own_gain', gain=hex(g), level=[round(v, 1) for v in lv])
     elif cmd == 'clear':
         mix_clear(bar, log)
         voice_stop(bar, log)

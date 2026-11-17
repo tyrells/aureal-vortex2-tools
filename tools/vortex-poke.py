@@ -36,13 +36,14 @@ timestamp (the same clock as qemu-trace.log) for alignment.
                                                  little-endian, skipping 0x2919c (a read acknowledges the
                                                  timer); for scan-dump.py. Meant for a guest at the Windows 98
                                                  boot menu or a plain DOS prompt, before any driver runs
-  sudo ./vortex-poke.py wtsend --loop [--log FILE] [--hold SECS] [--min-age SECS]
+  sudo ./vortex-poke.py wtsend --loop [--log FILE] [--hold SECS] [--min-age SECS] [--rate WORD]
                                                  the same sweep on any looping sound (Half-Life: stand next
                                                  to a generator or machinery hum): takes a second-half voice
                                                  with DSREG clear and a non-zero send that has played one
                                                  sound for --min-age s
                                                  (4), 1.5 s per step (about 45 s); if the sound stops or the
-                                                 voice is reused it waits for another loop and resumes
+                                                 voice is reused it waits for another loop and resumes;
+                                                 --rate takes only voices with that rate word (0x5acc = 11025 Hz)
   sudo ./vortex-poke.py wtsend [--log FILE] [--hold SECS]
                                                  run alongside 'A3DTEST run21' (a3dds) or run20: sweeps
                                                  each 48 kHz tone buffer in turn until Ctrl-C. Finds the
@@ -175,7 +176,8 @@ def main():
         loop = '--loop' in sys.argv
         hold = float(sys.argv[sys.argv.index('--hold') + 1]) if '--hold' in sys.argv else 1.5
         age = float(sys.argv[sys.argv.index('--min-age') + 1]) if '--min-age' in sys.argv else 4.0
-        wtsend(bar, note, hold, loop, age)
+        rate = int(sys.argv[sys.argv.index('--rate') + 1], 0) if '--rate' in sys.argv else None
+        wtsend(bar, note, hold, loop, age, rate=rate)
         return
     if cmd == 'wtfilt':
         log = open(logpath, 'a')
@@ -756,7 +758,7 @@ def _ws_find_tone(bar):
         time.sleep(0.2)
 
 
-def _ws_find_loop(bar, note, min_age, exclude=()):
+def _ws_find_loop(bar, note, min_age, exclude=(), rate=None):
     """A second-half voice with DSREG clear and a non-zero send that has kept the same sound
     (PARM0 and PARM3 unchanged) and kept running for min_age seconds: a looping sound on the
     send path. Voices with both sends 0 (A3D sources fed from a wavetable voice) are skipped."""
@@ -773,6 +775,9 @@ def _ws_find_loop(bar, note, min_age, exclude=()):
             live += 1
             base = WT_PARM(k)
             key = (bar.rd(base) & ~1, bar.rd(base + 12))
+            if rate is not None and key[0] & 0xfffe != rate:
+                seen.pop(k, None)
+                continue
             if not key[1] & 0x3fff:             # both sends 0: an A3D source's input, not the send path
                 seen.pop(k, None)
                 continue
@@ -787,7 +792,7 @@ def _ws_find_loop(bar, note, min_age, exclude=()):
         time.sleep(0.1)
 
 
-def wtsend(bar, note, hold=2.5, loop=False, min_age=4.0, repeat=True):
+def wtsend(bar, note, hold=2.5, loop=False, min_age=4.0, repeat=True, rate=None):
     """Step a second-half voice's reverb send, chorus send and pan field.
     Default: the 48 kHz tones of 'A3DTEST run20' and 'run21', each new tone buffer swept in
     turn until Ctrl-C. With loop=True: any looping sound, such as
@@ -800,7 +805,7 @@ def wtsend(bar, note, hold=2.5, loop=False, min_age=4.0, repeat=True):
         while i < len(sched):
             if loop:
                 print('waiting for a looping sound on a second-half voice with DSREG clear...')
-                v = _ws_find_loop(bar, note, min_age)
+                v = _ws_find_loop(bar, note, min_age, rate=rate)
             else:
                 print('waiting for a second-half wavetable voice at 48 kHz with DSREG clear (A3DTEST run21 or run20)...')
                 v = _ws_find_tone(bar)

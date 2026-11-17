@@ -25,6 +25,8 @@
  *           driver's only client, as in a game's DirectSound mode
  *   run18 = sync wttone: steady tones on a wavetable voice at each common rate (its 4-point
  *           interpolator) and a panned native tone (about 2 minutes)
+ *   run23 = sync hlds2 sync: several buffers at once on A3D's private DirectSound, so they
+ *           overflow the ADB channels (about 2 minutes; with vortex-poke.py wtsend --loop)
  *   run22 = sync hlds sync: buffers on A3D's private DirectSound, as Half-Life makes them
  *           (about 5 minutes; run alongside vortex-poke.py wtsend --loop on the host)
  *   run21 = sync a3dds sync: 2D DirectSound buffers beside busy A3D sources (about 4 minutes;
@@ -1777,10 +1779,10 @@ static void t_a3dds(void) {
    buffer is a looping 1 kHz tone: SetPan -10000..10000 and SetVolume 0/-600/-1200, 2 s each,
    then 45 s held for 'vortex-poke.py wtsend --loop', which only takes voices whose sends are
    non-zero. Headphones. About 5 minutes. */
-static LPDIRECTSOUNDBUFFER hlds_buffer(LPDIRECTSOUND ds, const char *name, DWORD flags, int rate, int bits, int *n) {
+static LPDIRECTSOUNDBUFFER hlds_buffer_hz(LPDIRECTSOUND ds, const char *name, DWORD flags, int rate, int bits, double hz, int *n) {
     DSBUFFERDESC1 d; WAVEFORMATEX wf; DSBCAPS c; DWORD bytes, n1, n2; void *data, *p1, *p2;
     LPDIRECTSOUNDBUFFER b = NULL; HRESULT hr;
-    data = make_tone2(rate, 1, bits, 1.0, 0.5, 1000, 1000, &bytes, &wf);
+    data = make_tone2(rate, 1, bits, 1.0, 0.5, hz, hz, &bytes, &wf);
     memset(&d, 0, sizeof d); d.dwSize = sizeof d; d.dwFlags = flags; d.dwBufferBytes = bytes; d.lpwfxFormat = &wf;
     hr = IDirectSound_CreateSoundBuffer(ds, (LPCDSBUFFERDESC)&d, &b, NULL);
     memset(&c, 0, sizeof c); c.dwSize = sizeof c;
@@ -1794,6 +1796,7 @@ static LPDIRECTSOUNDBUFFER hlds_buffer(LPDIRECTSOUND ds, const char *name, DWORD
     GlobalFree(data);
     return b;
 }
+#define hlds_buffer(ds, name, flags, rate, bits, n) hlds_buffer_hz(ds, name, flags, rate, bits, 1000.0, n)
 static void hlds_steps(LPDIRECTSOUNDBUFFER b, const char *name, SRC *bed, int nbed, int *n) {
     static const long pans[] = { -10000, -2400, -600, 0, 600, 2400, 10000 };
     static const long vols[] = { 0, -600, -1200 };
@@ -1855,6 +1858,76 @@ static void t_hlds(void) {
     logmsg("TEST hlds end");
 }
 
+/* hlds2: several ordinary buffers at once on A3D's private DirectSound (run 23).
+   Run 22 showed that the hardware buffers made there (11 kHz 8-bit, 22 kHz with LOCHARDWARE,
+   44.1 kHz) each took the one ADB channel the 12 quiet 3D sources left free (channel 3). Half-
+   Life has up to 28 ordinary sounds playing at once, so the guess now is that buffers beyond
+   the free ADB channels go to second-half wavetable voices 4 and up, with the two sends as
+   their pan. Beside the same 12 quiet 3D noise sources, this starts 6 filler buffers (11 kHz
+   8-bit, tones at 300-800 Hz, volume -3000 mB), then the 1 kHz test buffer the same way,
+   steps its pan and volume (2 s each) and holds it 60 s for 'vortex-poke.py wtsend --loop'.
+   Then it stops the fillers one at a time, 3 s apart, with the test buffer still playing.
+   Headphones. About 2 minutes. */
+static void t_hlds2(void) {
+    const DWORD fl = DSBCAPS_CTRLPAN | DSBCAPS_CTRLVOLUME | DSBCAPS_CTRLFREQUENCY;
+    static const long pans[] = { -10000, -2400, -600, 0, 600, 2400, 10000 };
+    static const long vols[] = { 0, -600, -1200 };
+    SRC bed[12]; LPDIRECTSOUND ds = NULL; LPDIRECTSOUNDBUFFER fill[6], b; HRESULT hr; int i, n = 0, nb;
+    logmsg("TEST hlds2 begin (headphones; 6 filler buffers then a 1 kHz test buffer on A3D's private DirectSound, beside 12 quiet 3D sources; held 60 s for vortex-poke.py wtsend --loop --rate 0x5acc)");
+    headphones();
+    memset(bed, 0, sizeof bed); memset(fill, 0, sizeof fill);
+    hr = IA3d4_QueryInterface(a3d, &IID_DS_A3DPRIV, (void **)&ds);
+    L_begin(); L_s("STEP hlds2 n="); L_i(n++); L_s(" what=QI private hr="); L_x(hr); L_end();
+    if (FAILED(hr) || !ds) { logmsg("TEST hlds2 end (no DirectSound from A3D)"); return; }
+    for (nb = 0; nb < 12; nb++) {
+        bed[nb].src = new_source(0, STIM_NOISE, 22050, 1, 16, 2.0);
+        if (!bed[nb].src) break;
+        place(&bed[nb], nb * 30.0 + 15.0, 0, 2.0);
+        IA3dSource_SetGain(bed[nb].src, 0.05f);
+        IA3dSource_Play(bed[nb].src, A3D_LOOPED);
+        hold(bed, nb + 1, 250);
+    }
+    L_begin(); L_s("STEP hlds2 n="); L_i(n++); L_s(" what=bed count="); L_i(nb); L_end();
+    hold(bed, nb, 1000);
+    for (i = 0; i < 6; i++) {
+        fill[i] = hlds_buffer_hz(ds, "filler", fl, 22050, 8, 300.0 + 100.0 * i, &n);
+        if (!fill[i]) continue;
+        IDirectSoundBuffer_SetVolume(fill[i], -3000);
+        IDirectSoundBuffer_Play(fill[i], 0, 0, DSBPLAY_LOOPING);
+        hold(bed, nb, 500);
+    }
+    b = hlds_buffer(ds, "test", fl, 11025, 8, &n);
+    if (b) {
+        IDirectSoundBuffer_Play(b, 0, 0, DSBPLAY_LOOPING);
+        L_begin(); L_s("STEP hlds2 n="); L_i(n++); L_s(" v=test what=play"); L_end();
+        hold(bed, nb, 1000);
+        for (i = 0; i < 7; i++) {
+            IDirectSoundBuffer_SetPan(b, pans[i]);
+            L_begin(); L_s("STEP hlds2 n="); L_i(n++); L_s(" v=test what=pan mb="); L_i(pans[i]); L_end();
+            hold(bed, nb, 2000);
+        }
+        IDirectSoundBuffer_SetPan(b, 0);
+        for (i = 0; i < 3; i++) {
+            IDirectSoundBuffer_SetVolume(b, vols[i]);
+            L_begin(); L_s("STEP hlds2 n="); L_i(n++); L_s(" v=test what=volume mb="); L_i(vols[i]); L_end();
+            hold(bed, nb, 2000);
+        }
+        IDirectSoundBuffer_SetVolume(b, 0);
+        L_begin(); L_s("STEP hlds2 n="); L_i(n++); L_s(" v=test what=hold for wtsend"); L_end();
+        hold(bed, nb, 60000);
+    }
+    for (i = 5; i >= 0; i--) {
+        if (!fill[i]) continue;
+        IDirectSoundBuffer_Stop(fill[i]); IDirectSoundBuffer_Release(fill[i]);
+        L_begin(); L_s("STEP hlds2 n="); L_i(n++); L_s(" what=filler stopped i="); L_i(i); L_end();
+        hold(bed, nb, 3000);
+    }
+    if (b) { IDirectSoundBuffer_Stop(b); IDirectSoundBuffer_Release(b); }
+    for (i = 0; i < nb; i++) kill_source(&bed[i]);
+    IDirectSound_Release(ds);
+    logmsg("TEST hlds2 end");
+}
+
 /* ------------------------------------------------------------------ main */
 typedef void (*TESTFN)(void);
 static const struct { const char *name; TESTFN fn; } tests[] = {
@@ -1865,7 +1938,7 @@ static const struct { const char *name; TESTFN fn; } tests[] = {
     {"multi", t_multi}, {"dsound", t_dsound}, {"elev5", t_elev5}, {"tcsweep", t_tcsweep}, {"click90", t_click90}, {"noise2d", t_noise2d}, {"wtpath", t_wtpath},
     {"srcresp", t_srcresp}, {"midi", t_midi}, {"level", t_level}, {"hrtfgrid", t_hrtfgrid}, {"reflhf", t_reflhf},
     {"dsfill", t_dsfill}, {"dshold", t_dshold}, {"eqhold", t_eqhold}, {"dswt", t_dswt}, {"ds3d", t_ds3d}, {"dsstream", t_dsstream},
-    {"dssync", t_dssync}, {"wttone", t_wttone}, {"wtnoise", t_wtnoise}, {"wtpan", t_wtpan}, {"a3dds", t_a3dds}, {"hlds", t_hlds},
+    {"dssync", t_dssync}, {"wttone", t_wttone}, {"wtnoise", t_wtnoise}, {"wtpan", t_wtpan}, {"a3dds", t_a3dds}, {"hlds", t_hlds}, {"hlds2", t_hlds2},
 };
 static int g_noa3d;     /* run16: A3D is never opened, so DirectSound is the driver's only client */
 /* default (no arguments): the run-2 suite */
@@ -1941,6 +2014,7 @@ void entry(void) {
         else if (seq(tok, "run20")) { t_sync(); t_wtpan(); }
         else if (seq(tok, "run21")) { t_sync(); t_a3dds(); t_sync(); }
         else if (seq(tok, "run22")) { t_sync(); t_hlds(); t_sync(); }
+        else if (seq(tok, "run23")) { t_sync(); t_hlds2(); t_sync(); }
         else if (seq(tok, "run12")) { t_sync(); t_srcresp(); t_level(); t_midi(); t_hrtfgrid(); }
         else run_named(tok);
         ran = 1;

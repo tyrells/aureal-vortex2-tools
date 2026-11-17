@@ -17,6 +17,8 @@ Run on the X79 host with the card bound to vfio-pci and no VM running, like srcp
   sudo ./wtprobe.py gains [--out FILE.npz]  the gain byte and the input gain byte on the direct-
                                              stream pair, the pair's pan, and the main pair with the
                                              other voices muted (about 15 s)
+  sudo ./wtprobe.py state                    the gain-state field, the filter byte and the input level
+                                             on the direct-stream pair (about 15 s)
   sudo ./wtprobe.py clear
 
 The chain: a second-half voice (global 40, local 8) with DSREG clear, so it plays onto its half's
@@ -74,7 +76,7 @@ def mute_others(bar, log):
     log(event='muted_others')
 
 
-def voice_setup(bar, log, pan, cho, rev, ds=False, gain=0xcf, level=None, ingain=0xcf):
+def voice_setup(bar, log, pan, cho, rev, ds=False, gain=0xcf, level=None, ingain=0xcf, state=7, filt=0xcf):
     w = sp.w
     w(bar, log, WT_FIFO_PC, 0, 'wt fifo: off')
     for i in range(64):
@@ -89,10 +91,10 @@ def voice_setup(bar, log, pan, cho, rev, ds=False, gain=0xcf, level=None, ingain
         w(bar, log, WT_DSREG, bar.rd(WT_DSREG) & ~(1 << LV), 'DSREG: voice clear (main pair and sends)')
     w(bar, log, WT_SYNC, 0, 'pair sync off')
     w(bar, log, WTDMA_CTRL, 0x22000, 'wt dma: signed 16-bit')
-    w(bar, log, WT_PARM + 0, 0xcf00a000 | (gain << 16), 'PARM0: filter open, gain, 48 kHz (direct pair: left gain)')
-    w(bar, log, WT_PARM + 4, 0xcf00a001 | (gain << 16), 'PARM1: same, state bit differing (direct pair: right gain)')
+    w(bar, log, WT_PARM + 0, (filt << 24) | 0xa000 | (gain << 16), 'PARM0: filter open, gain, 48 kHz (direct pair: left gain)')
+    w(bar, log, WT_PARM + 4, (filt << 24) | 0xa001 | (gain << 16), 'PARM1: same, state bit differing (direct pair: right gain)')
     w(bar, log, WT_PARM + 8, 0, 'PARM2: no feedback, phase 0')
-    w(bar, log, WT_PARM + 12, (parm3(pan, cho, rev) & 0x00ffffff) | (ingain << 24), f'PARM3: input gain {ingain:#04x} pan {pan:#04x} chorus {cho:#04x} reverb {rev:#04x}')
+    w(bar, log, WT_PARM + 12, (parm3(pan, cho, rev) & 0x001fffff) | (state << 21) | (ingain << 24), f'PARM3: input gain {ingain:#04x} pan {pan:#04x} chorus {cho:#04x} reverb {rev:#04x}')
     w(bar, log, WT_RUN, 0, 'running flag (driver writes 0)')
 
 
@@ -105,10 +107,10 @@ def voice_stop(bar, log):
     sp.w(bar, log, WT_PARM + 12, 0, 'PARM3: hard mute')
 
 
-def capture_bus(bar, log, bus, pan, cho, rev, ds=False, gain=0xcf, level=None, go=True, ingain=0xcf):
+def capture_bus(bar, log, bus, pan, cho, rev, ds=False, gain=0xcf, level=None, go=True, ingain=0xcf, state=7, filt=0xcf):
     sp.SRC_FEED = ALL[bus]
     sp.setup(bar, log, 0, 13, 0x4000, pattern=[0] * 64)
-    voice_setup(bar, log, pan, cho, rev, ds=ds, gain=gain, level=level, ingain=ingain)
+    voice_setup(bar, log, pan, cho, rev, ds=ds, gain=gain, level=level, ingain=ingain, state=state, filt=filt)
     if go:
         voice_go(bar)
     r, _, _ = sp.flush_and_read(bar, log, flush=False)
@@ -126,7 +128,7 @@ def capture_bus(bar, log, bus, pan, cho, rev, ds=False, gain=0xcf, level=None, g
 
 def main():
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
-    if cmd not in ('start', 'bus', 'sweep', 'levels', 'gains', 'clear'):
+    if cmd not in ('start', 'bus', 'sweep', 'levels', 'gains', 'state', 'clear'):
         sys.exit(__doc__)
     if sp.vm_running():
         sys.exit('a QEMU process is running; stop the VM first (this needs the card idle)')
@@ -218,6 +220,23 @@ def main():
         path = sp.arg('--out', 'wtprobe-gains.npz', str)
         np.savez(path, rows=np.array(rows), input=0x1000)
         log(event='saved', path=path)
+    elif cmd == 'state':
+        # gains run: the gain bytes decode exactly as modelled, and the pan is (127 - p) / 127 and
+        # p / 127, but a full voice comes out at 1.587 x its input, not the x2 the headroom gives.
+        # Candidates: the gain-state field (PARM3 bits 23-21, 7 = normal) and the filter byte.
+        mute_others(bar, log)
+        for st in range(8):
+            lv, _ = capture_bus(bar, quiet, 'ds_left', 0, 0x7f, 0x7f, ds=True, level=0x1000, state=st)
+            log(event='state', state=st, level=[round(v, 1) for v in lv])
+            # a ramping state would not settle: keep the raw run too
+            _, r = capture_bus(bar, quiet, 'ds_left', 0, 0x7f, 0x7f, ds=True, level=0x1000, state=st)
+            log(event='state_raw', state=st, samples=r[:150])
+        for f in (0xcf, 0xd0, 0xdf, 0xe0, 0xef, 0xff, 0xce, 0xc0, 0xb0):
+            lv, _ = capture_bus(bar, quiet, 'ds_left', 0, 0x7f, 0x7f, ds=True, level=0x1000, filt=f)
+            log(event='filter', code=hex(f), level=[round(v, 1) for v in lv])
+        for lvl in (0x0001, 0x0010, 0x0100, 0x1000, 0x2000, 0x4000, 0x7fff, -0x1000, -0x8000):
+            lv, _ = capture_bus(bar, quiet, 'ds_left', 0, 0x7f, 0x7f, ds=True, level=lvl)
+            log(event='input', level_in=lvl, level=[round(v, 1) for v in lv])
     elif cmd == 'clear':
         voice_stop(bar, log)
         sp.clear(bar, log)

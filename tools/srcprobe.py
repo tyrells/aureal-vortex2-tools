@@ -16,6 +16,9 @@ then idle and nothing else writes to it). Nothing here needs a guest or a driver
                                                   (0..16383), saving each pass's output
   sudo ./srcprobe.py release                      take the codec out of reset and start the AC-link
                                                   (the chip's audio clock); a cold card has it held
+  sudo ./srcprobe.py ampsweep [--frac F] [--out FILE.npz]
+                                                  one phase at 576 impulse heights (1-64, then every
+                                                  64 to 32767), about 10 s
   sudo ./srcprobe.py clear                        undo everything this script sets
 
 The chain, following the method of the register map's author (names from his map):
@@ -324,7 +327,7 @@ def arg(name, default, conv=lambda s: int(s, 0)):
 
 
 def main():
-    if len(sys.argv) < 2 or sys.argv[1] not in ('ram', 'run', 'sweep', 'clear', 'release'):
+    if len(sys.argv) < 2 or sys.argv[1] not in ('ram', 'run', 'sweep', 'ampsweep', 'clear', 'release'):
         sys.exit(__doc__)
     if vm_running():
         sys.exit('a QEMU process is running; stop the VM first (this needs the card idle)')
@@ -365,6 +368,22 @@ def main():
         path = arg('--out', 'srcprobe-sweep.npz', str)
         np.savez(path, fracs=np.array(fracs), response=np.array(outs), fifo_out=np.array(dbufs), wing=wing, ratio=ratio, amp=amp)
         log(event='saved', path=path, points=len(fracs))
+    elif cmd == 'ampsweep':
+        # one phase, many impulse heights: how each output depends on the height shows the
+        # arithmetic (one rounded product, or several, e.g. a table entry plus an interpolated step)
+        import numpy as np
+        frac = arg('--frac', 0x2000)
+        amps = list(range(1, 65)) + list(range(64, 32768, 64)) + [32767]
+        quiet = Log(os.devnull)
+        outs = []
+        for amp_i in amps:
+            setup(bar, quiet, frac, wing, ratio, amp=amp_i)
+            r, o, d = flush_and_read(bar, quiet, flush=False)
+            clear(bar, quiet)
+            outs.append((r + [0] * 160)[:160])
+        path = arg('--out', f'srcprobe-amp-{frac:04x}.npz', str)
+        np.savez(path, frac=frac, amps=np.array(amps), response=np.array(outs), wing=wing, ratio=ratio)
+        log(event='saved', path=path, points=len(amps))
     elif cmd == 'release':
         release(bar, log)
     elif cmd == 'clear':

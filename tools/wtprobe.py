@@ -19,6 +19,9 @@ Run on the X79 host with the card bound to vfio-pci and no VM running, like srcp
                                              other voices muted (about 15 s)
   sudo ./wtprobe.py state                    the gain-state field, the filter byte and the input level
                                              on the direct-stream pair (about 15 s)
+  sudo ./wtprobe.py mix                      the same constant from an ADB FIFO and from the voice,
+                                             straight to the converter and through mixer 0 at unity
+                                             (about 10 s)
   sudo ./wtprobe.py clear
 
 The chain: a second-half voice (global 40, local 8) with DSREG clear, so it plays onto its half's
@@ -126,9 +129,65 @@ def capture_bus(bar, log, bus, pan, cho, rev, ds=False, gain=0xcf, level=None, g
     return ((ev + od) / 2, ev, od), r
 
 
+# ---------------------------------------------------------------- mixer comparison
+MIX_HDR = 0x21e40                            # + rate * 4: first mixer on the rate's work-to-do list
+MIX_NEXT = 0x21e00                           # + mixer * 4: next mixer (bit 4 valid)
+MIX_ACTIVE = 0x21f00                         # bit per rate (CAsp4Mixer::EnableSampleRate)
+MIX_INVOL_A, MIX_INVOL_B = 0x21000, 0x20000  # target, current: + ((mix << 5) + in) * 4
+MIX_VOL_A, MIX_VOL_B = 0x21800, 0x20800      # target, current: + mix * 4
+MIX_ENIN = 0x21a00                           # + ((mix << 3) + (in >> 2)) * 4, bit in & 3
+MIXER, MIXIN = 0, 0
+
+
+def mix_route(bar, log, feed, in_gain=0x08, out_gain=0x08):
+    """feed -> mixer 0 input 0 -> mixer 0 out -> converter 0, all on the converter's rate.
+    Called after sp.setup, which has set up the converter and its link to the output."""
+    w, R_ = sp.w, sp.RATE
+    w(bar, log, MIX_ACTIVE, bar.rd(MIX_ACTIVE) & ~(1 << R_), 'mixer rate off')
+    w(bar, log, sp.VDB_WTDRAM_HEADERLINKS + 4 * R_, (feed << 8) | (0x50 + MIXIN), f'vdb hdr: {feed:#04x} -> mixer input')
+    w(bar, log, sp.VDB_WTDRAM_DESTLINKS + 4 * (0x50 + MIXIN), ((0x30 + MIXER) << 8) | sp.SRC_DSTADDR, 'vdb link: mixer out -> SRC in')
+    for a in (MIX_INVOL_A, MIX_INVOL_B):
+        for i in range(32):
+            bar.wr(a + ((MIXER << 5) + i) * 4, 0x80)          # every input muted
+        w(bar, log, a + ((MIXER << 5) + MIXIN) * 4, in_gain, f'mixer input gain {in_gain:#04x}')
+    for a in (MIX_VOL_A, MIX_VOL_B):
+        w(bar, log, a + MIXER * 4, out_gain, f'mixer output gain {out_gain:#04x}')
+    for i in range(8):
+        bar.wr(MIX_ENIN + ((MIXER << 3) + i) * 4, 0)
+    w(bar, log, MIX_ENIN + ((MIXER << 3) + (MIXIN >> 2)) * 4, 1 << (MIXIN & 3), 'mixer input enabled')
+    w(bar, log, MIX_HDR + 4 * R_, MIXER, 'mixer work-to-do: mixer 0, no next (as CAsp4Mixer::AddWTD)')
+    w(bar, log, MIX_ACTIVE, bar.rd(MIX_ACTIVE) | (1 << R_), 'mixer rate on')
+
+
+def mix_clear(bar, log):
+    sp.w(bar, log, MIX_ACTIVE, bar.rd(MIX_ACTIVE) & ~(1 << sp.RATE), 'mixer rate off')
+    sp.w(bar, log, MIX_HDR + 4 * sp.RATE, 0, 'mixer work-to-do: none')
+    sp.w(bar, log, sp.VDB_WTDRAM_DESTLINKS + 4 * (0x50 + MIXIN), sp.END, 'vdb link: none')
+
+
+def capture_mix(bar, log, source, via_mixer, level=0x1000, in_gain=0x08):
+    """source 'adb': VDB FIFO 0 preloaded with a constant; 'wt': the wavetable voice on the
+    direct-stream pair (DSREG set, pan 0, gain 0xcf) playing the same constant."""
+    feed = sp.FIFO_IN if source == 'adb' else ALL['ds_left']
+    sp.SRC_FEED = feed
+    sp.setup(bar, log, 0, 13, 0x4000, pattern=[level] * 64)
+    if via_mixer:
+        mix_route(bar, log, feed, in_gain=in_gain)
+    voice_setup(bar, log, 0, 0x7f, 0x7f, ds=True, level=level, gain=0xcf if source == 'wt' else 0)
+    voice_go(bar)
+    r, _, _ = sp.flush_and_read(bar, log, flush=False)
+    voice_stop(bar, log)
+    if via_mixer:
+        mix_clear(bar, log)
+    sp.clear(bar, log)
+    nz = [i for i, x in enumerate(r) if x]
+    seg = r[nz[0] + 4: nz[0] + 24] if nz else []
+    return (sum(seg) / len(seg) if seg else 0.0), r
+
+
 def main():
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
-    if cmd not in ('start', 'bus', 'sweep', 'levels', 'gains', 'state', 'clear'):
+    if cmd not in ('start', 'bus', 'sweep', 'levels', 'gains', 'state', 'mix', 'clear'):
         sys.exit(__doc__)
     if sp.vm_running():
         sys.exit('a QEMU process is running; stop the VM first (this needs the card idle)')
@@ -237,7 +296,24 @@ def main():
         for lvl in (0x0001, 0x0010, 0x0100, 0x1000, 0x2000, 0x4000, 0x7fff, -0x1000, -0x8000):
             lv, _ = capture_bus(bar, quiet, 'ds_left', 0, 0x7f, 0x7f, ds=True, level=lvl)
             log(event='input', level_in=lvl, level=[round(v, 1) for v in lv])
+    elif cmd == 'mix':
+        # run 16 found a direct-stream voice at 0xcf and centre pan as loud as the plain ADB path,
+        # through the mixer to the codec; wtprobe finds the voice at 0.794 of x2 per side. The
+        # same constant from an ADB FIFO and from the voice, each straight into the converter and
+        # each through mixer 0 at unity in and out; the ADB FIFO holds only 32 samples, so the
+        # level is taken over the first 20 after the response starts.
+        mute_others(bar, log)
+        for lvl in (0x1000, 0x2000):
+            for source in ('adb', 'wt'):
+                for via in (False, True):
+                    takes = [capture_mix(bar, quiet, source, via, level=lvl) for _ in range(3)]
+                    log(event='mix', source=source, via_mixer=via, level_in=lvl,
+                        level=[round(t[0], 1) for t in takes], first=[x for x in takes[0][1] if x][:12])
+        for g in (0x00, 0x04, 0x08, 0x0c, 0x10):
+            lv, r = capture_mix(bar, quiet, 'adb', True, level=0x1000, in_gain=g)
+            log(event='mix_gain', in_gain=hex(g), level=round(lv, 1))
     elif cmd == 'clear':
+        mix_clear(bar, log)
         voice_stop(bar, log)
         sp.clear(bar, log)
 

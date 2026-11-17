@@ -11,7 +11,7 @@ then idle and nothing else writes to it). Nothing here needs a guest or a driver
                                                   stage 2: one pass: route FIFO -> SRC -> FIFO,
                                                   preload an impulse, enable, flush, read back
                                                   (--alias: send the output to FIFO b's alias)
-  sudo ./srcprobe.py sweep [--step S] [--wing W] [--out FILE.npz] [--log FILE]
+  sudo ./srcprobe.py sweep [--step S] [--wing W] [--amp A] [--out FILE.npz] [--log FILE]
                                                   stage 3: 'run' for every S-th time fraction
                                                   (0..16383), saving each pass's output
   sudo ./srcprobe.py release                      take the codec out of reset and start the AC-link
@@ -341,11 +341,12 @@ def main():
     cmd = sys.argv[1]
     log(event='start', cmd=cmd, argv=sys.argv[1:], chip_ctrl=hex(bar.rd(0x2a00c)))
     wing = arg('--wing', 13)
+    amp = arg('--amp', 0x4000)              # impulse height; 0x7fff (full scale) shows the last bits
     ratio = arg('--ratio', 0x4000)
     if cmd == 'ram':
         stage_ram(bar, log)
     elif cmd == 'run':
-        setup(bar, log, arg('--frac', 0), wing, ratio, dmaptr=arg('--dmaptr', 32))
+        setup(bar, log, arg('--frac', 0), wing, ratio, amp=amp, dmaptr=arg('--dmaptr', 32))
         flush_and_read(bar, log, flush='--flush' in sys.argv)
         clear(bar, log)
     elif cmd == 'sweep':
@@ -355,14 +356,14 @@ def main():
         outs, dbufs = [], []
         quiet = Log(os.devnull)
         for f in fracs:
-            setup(bar, quiet, f, wing, ratio)
+            setup(bar, quiet, f, wing, ratio, amp=amp)
             r, o, d = flush_and_read(bar, quiet, flush=False)
             clear(bar, quiet)
             r = (r + [0] * 160)[:160]
             outs.append(r); dbufs.append(o)
             log(event='sweep_point', frac=f, peak=max(r, key=abs), nonzero=[(i, x) for i, x in enumerate(r) if x])
         path = arg('--out', 'srcprobe-sweep.npz', str)
-        np.savez(path, fracs=np.array(fracs), response=np.array(outs), fifo_out=np.array(dbufs), wing=wing, ratio=ratio)
+        np.savez(path, fracs=np.array(fracs), response=np.array(outs), fifo_out=np.array(dbufs), wing=wing, ratio=ratio, amp=amp)
         log(event='saved', path=path, points=len(fracs))
     elif cmd == 'release':
         release(bar, log)

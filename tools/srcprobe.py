@@ -1,0 +1,276 @@
+#!/usr/bin/env python3
+"""Read the sample-rate converter's interpolation table out of an idle card, from the Linux host.
+
+Run on the X79 host with the card bound to vfio-pci and no VM running (the card's blocks are
+then idle and nothing else writes to it). Nothing here needs a guest or a driver.
+
+  sudo ./srcprobe.py ram   [--log FILE]           stage 1: which RAMs take host writes, and how
+                                                  the converter FIFOs are split between channels
+  sudo ./srcprobe.py run   [--frac F] [--wing W] [--ratio R] [--alias] [--log FILE]
+                                                  stage 2: one pass: route FIFO -> SRC -> FIFO,
+                                                  preload an impulse, enable, flush, read back
+                                                  (--alias: send the output to FIFO b's alias)
+  sudo ./srcprobe.py sweep [--step S] [--wing W] [--out FILE.npz] [--log FILE]
+                                                  stage 3: 'run' for every S-th time fraction
+                                                  (0..16383), saving each pass's output
+  sudo ./srcprobe.py clear                        undo everything this script sets
+
+The chain, following the method of the register map's author (names from his map):
+  VDB FIFO a (preloaded by the host) -> SRC k input -> SRC k output -> VDB FIFO b
+Both VDB links hang off sample-rate header SRCk (VDB_HDR_SRC0 + 4k), and the converter's own
+work-to-do list for that rate (SRC_HDR_SRC0 + 4k) holds channel k, so the converter clocks itself
+from its throttle counter. With the conversion ratio at 1, every output sample is the impulse
+weighted by the table at one fixed phase, set by the current time fraction (SRC_CHANNEL_PARAMS4,
+14 bits); the samples-per-wing field (SRC_CHANNEL_PARAMS0 bits 7-4) sets the window width.
+The order is the one he gives: program the routes without enabling them, program the converter
+and its work-to-do entry, preload the FIFO, enable the routes' sample rate, then set the FIFO's
+flush bit (bit 21 of its pointer/control word) and read the far end.
+
+Every step's register writes and readbacks go to the JSON log, so a run that does not behave
+still shows where the chain stopped.
+"""
+import ctypes
+import datetime
+import json
+import mmap
+import os
+import sys
+import time
+
+DEV = os.environ.get('HOSTDEV', '0000:0c:01.0')
+RES = f'/sys/bus/pci/devices/{DEV}/resource0'
+SIZE = 0x40000
+
+# register map names (see the map's author's AU8830.h; addresses also in ALSA's au8830.h)
+FIFO_VDB_CHANNEL_DATA = 0x14000          # + ch * 0x100, 64 words, low 16 bits = sample
+FIFO_VDB_CHANNEL_PC = 0x16100            # + ch * 4: pointers and control
+PC_FLUSH = 1 << 21
+PC_FREEZE = 1 << 20
+PC_VALID = 1 << 4
+PC_EMPTY = 1 << 5
+SRC_INPUT_FIFO = 0x26000
+SRC_OUTPUT_DOUBLE_BUFFER = 0x26800
+SRC_NEXT_CHANNEL = 0x26C00               # + k * 4: bit 4 valid, bits 3-0 next channel
+SRC_SR_HEADER = 0x26C40                  # + rate * 4: bit 4 valid, bits 3-0 first channel
+SRC_ACTIVE_SAMPLE_RATE = 0x26CC0         # bit per sample rate
+SRC_THROTTLE_SOURCE = 0x26CC4            # bit per channel: 0 = counter / 2
+SRC_THROTTLE_COUNT_SIZE = 0x26CC8        # 10 bits: system clocks per period
+SRC_CHANNEL_PARAMS = [0x26E00 + 0x40 * i for i in range(7)]   # + k * 4
+VDB_WTDRAM_DESTLINKS = 0x28000           # + dest * 4: next link (src << 8 | dest), 0xffff = end
+VDB_WTDRAM_HEADERLINKS = 0x282B4         # + rate * 4: first link
+VDB_ACTIVE_SR = 0x28400                  # bit per sample rate (ALSA VORTEX_ADB_SR)
+END = 0xffff
+
+SRC_K, FIFO_IN, FIFO_OUT = 0, 0, 1       # converter 0, VDB FIFOs 0 (in) and 1 (out)
+RATE = SRC_K                             # sample-rate header SRC0: the converter's own rate
+SRC_SRCADDR = 0x20 + SRC_K               # VDB source address of the converter's output
+SRC_DSTADDR = 0x40 + SRC_K               # VDB destination address of its input
+OUT_DST = FIFO_OUT                       # VDB destination of the output: FIFO b, or with --alias
+                                         # its alias (0x20 + b), which the map lists separately
+
+
+def utc():
+    return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='microseconds').replace('+00:00', 'Z')
+
+
+class Bar:
+    def __init__(self):
+        self.fd = os.open(RES, os.O_RDWR | os.O_SYNC)
+        self.mm = mmap.mmap(self.fd, SIZE, mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE)
+        self.base = ctypes.addressof(ctypes.c_char.from_buffer(self.mm))
+
+    def rd(self, a):
+        return ctypes.c_uint32.from_address(self.base + a).value
+
+    def wr(self, a, v):
+        ctypes.c_uint32.from_address(self.base + a).value = v & 0xffffffff
+
+
+class Log:
+    def __init__(self, path):
+        self.f = open(path, 'a')
+
+    def __call__(self, **kw):
+        kw['utc'] = utc()
+        line = json.dumps(kw)
+        self.f.write(line + '\n'); self.f.flush()
+        print(line)
+
+
+def w(bar, log, addr, val, what):
+    old = bar.rd(addr); bar.wr(addr, val); back = bar.rd(addr)
+    log(event='write', what=what, addr=hex(addr), old=hex(old), wrote=hex(val), readback=hex(back))
+    return back
+
+
+def regs(bar):
+    """The words this script touches, for before/after snapshots."""
+    k, a, b = SRC_K, FIFO_IN, FIFO_OUT
+    r = {
+        'fifo_in_pc': FIFO_VDB_CHANNEL_PC + 4 * a, 'fifo_out_pc': FIFO_VDB_CHANNEL_PC + 4 * b,
+        'src_next': SRC_NEXT_CHANNEL + 4 * k, 'src_hdr': SRC_SR_HEADER + 4 * RATE,
+        'src_active': SRC_ACTIVE_SAMPLE_RATE, 'throttle_src': SRC_THROTTLE_SOURCE,
+        'throttle_size': SRC_THROTTLE_COUNT_SIZE,
+        'vdb_hdr': VDB_WTDRAM_HEADERLINKS + 4 * RATE, 'vdb_link_srcin': VDB_WTDRAM_DESTLINKS + 4 * SRC_DSTADDR,
+        'vdb_link_out': VDB_WTDRAM_DESTLINKS + 4 * OUT_DST, 'vdb_active': VDB_ACTIVE_SR,
+    }
+    r.update({f'params{i}': SRC_CHANNEL_PARAMS[i] + 4 * k for i in range(7)})
+    return {n: hex(bar.rd(addr)) for n, addr in r.items()}
+
+
+def window(bar, base, n):
+    return [bar.rd(base + 4 * i) & 0xffff for i in range(n)]
+
+
+def s16(v):
+    return v - 0x10000 if v & 0x8000 else v
+
+
+# ---------------------------------------------------------------- stage 1
+
+def stage_ram(bar, log):
+    """Write a pattern to each RAM and read it back; restore what was there.
+    For the converter FIFOs, a write to one address and reads of its neighbours show how the
+    0x800 (input) and 0x400 (output) byte areas are split between the 16 channels."""
+    log(event='stage', name='ram')
+    for name, base, n in (('vdb_fifo_data', FIFO_VDB_CHANNEL_DATA + 0x100 * FIFO_IN, 64),
+                          ('src_input_fifo', SRC_INPUT_FIFO, 0x200),
+                          ('src_output_double_buffer', SRC_OUTPUT_DOUBLE_BUFFER, 0x100)):
+        saved = [bar.rd(base + 4 * i) for i in range(n)]
+        for i in range(n):
+            bar.wr(base + 4 * i, (0x5a00 + i) & 0xffff)
+        back = [bar.rd(base + 4 * i) & 0xffff for i in range(n)]
+        ok = [i for i in range(n) if back[i] == (0x5a00 + i) & 0xffff]
+        log(event='ram', name=name, base=hex(base), words=n, writable=len(ok),
+            first_bad=next((hex(base + 4 * i) for i in range(n) if i not in ok), None),
+            sample=[hex(x) for x in back[:8]])
+        for i in range(n):
+            bar.wr(base + 4 * i, saved[i])
+    log(event='stage_done', name='ram')
+
+
+# ---------------------------------------------------------------- stage 2
+
+def setup(bar, log, frac, wing, ratio, impulse_at=8, amp=0x4000):
+    k, a, b = SRC_K, FIFO_IN, FIFO_OUT
+    log(event='before', regs=regs(bar))
+    # 1. VDB routes, not yet enabled: header SRCk -> FIFO a to SRC k in -> SRC k out to FIFO b
+    w(bar, log, VDB_ACTIVE_SR, bar.rd(VDB_ACTIVE_SR) & ~(1 << RATE), 'vdb rate off')
+    w(bar, log, VDB_WTDRAM_HEADERLINKS + 4 * RATE, (a << 8) | SRC_DSTADDR, 'vdb hdr: FIFO a -> SRC in')
+    w(bar, log, VDB_WTDRAM_DESTLINKS + 4 * SRC_DSTADDR, (SRC_SRCADDR << 8) | OUT_DST, 'vdb link: SRC out -> FIFO b')
+    w(bar, log, VDB_WTDRAM_DESTLINKS + 4 * OUT_DST, END, 'vdb link: end')
+    # 2. the converter and its work-to-do entry on its own rate
+    w(bar, log, SRC_ACTIVE_SAMPLE_RATE, bar.rd(SRC_ACTIVE_SAMPLE_RATE) & ~(1 << RATE), 'src rate off')
+    w(bar, log, SRC_THROTTLE_SOURCE, bar.rd(SRC_THROTTLE_SOURCE) & ~(1 << k), 'throttle: counter/2')
+    w(bar, log, SRC_THROTTLE_COUNT_SIZE, 512, 'throttle count 512 (48 kHz with /2)')
+    w(bar, log, SRC_CHANNEL_PARAMS[0] + 4 * k, ((wing - 1) << 4) | k, 'params0: wing, throttle, self')
+    w(bar, log, SRC_CHANNEL_PARAMS[1] + 4 * k, ratio, 'params1: 1/ratio 3.14')
+    w(bar, log, SRC_CHANNEL_PARAMS[2] + 4 * k, 0, 'params2: drift error 0')
+    w(bar, log, SRC_CHANNEL_PARAMS[3] + 4 * k, 0, 'params3: drift last 0')
+    w(bar, log, SRC_CHANNEL_PARAMS[4] + 4 * k, frac & 0x3fff, 'params4: time fraction')
+    w(bar, log, SRC_CHANNEL_PARAMS[5] + 4 * k, 1, 'params5: drift count 1')
+    w(bar, log, SRC_CHANNEL_PARAMS[6] + 4 * k, 0, 'params6: pointers 0, depth 12, dir out')
+    w(bar, log, SRC_NEXT_CHANNEL + 4 * k, 0, 'src next: end of list')
+    w(bar, log, SRC_SR_HEADER + 4 * RATE, 0x10 | k, 'src hdr: channel k')
+    for i in range(0x80 // 4):
+        bar.wr(SRC_INPUT_FIFO + 0x80 * k + 4 * i, 0)
+    # 3. FIFOs: input preloaded with an impulse, output cleared
+    for i in range(64):
+        bar.wr(FIFO_VDB_CHANNEL_DATA + 0x100 * a + 4 * i, amp if i == impulse_at else 0)
+        bar.wr(FIFO_VDB_CHANNEL_DATA + 0x100 * b + 4 * i, 0)
+    log(event='preload', fifo=a, impulse_at=impulse_at, amp=hex(amp),
+        readback=[hex(x) for x in window(bar, FIFO_VDB_CHANNEL_DATA + 0x100 * a, 16)])
+    w(bar, log, FIFO_VDB_CHANNEL_PC + 4 * a, PC_VALID, 'fifo a: valid, pointers 0, mono')
+    w(bar, log, FIFO_VDB_CHANNEL_PC + 4 * b, PC_VALID | PC_EMPTY, 'fifo b: valid, empty')
+    w(bar, log, SRC_ACTIVE_SAMPLE_RATE, bar.rd(SRC_ACTIVE_SAMPLE_RATE) | (1 << RATE), 'src rate on')
+    # 4. enable the route's sample rate
+    w(bar, log, VDB_ACTIVE_SR, bar.rd(VDB_ACTIVE_SR) | (1 << RATE), 'vdb rate on')
+
+
+def flush_and_read(bar, log, reads=20, gap=0.0005):
+    k, a, b = SRC_K, FIFO_IN, FIFO_OUT
+    # 5. pump: the flush bit on the input FIFO (mask bits 31-22 left 0 = use new values)
+    pc = bar.rd(FIFO_VDB_CHANNEL_PC + 4 * a)
+    w(bar, log, FIFO_VDB_CHANNEL_PC + 4 * a, (pc & 0x3fffff) | PC_FLUSH, 'fifo a: flush')
+    snaps = []
+    for i in range(reads):
+        snaps.append({'t_ms': round(i * gap * 1000, 2),
+                      'pc_in': hex(bar.rd(FIFO_VDB_CHANNEL_PC + 4 * a)),
+                      'pc_out': hex(bar.rd(FIFO_VDB_CHANNEL_PC + 4 * b)),
+                      'params4': hex(bar.rd(SRC_CHANNEL_PARAMS[4] + 4 * k)),
+                      'params6': hex(bar.rd(SRC_CHANNEL_PARAMS[6] + 4 * k))})
+        time.sleep(gap)
+    out = [s16(x) for x in window(bar, FIFO_VDB_CHANNEL_DATA + 0x100 * b, 64)]
+    dbuf = [s16(x) for x in window(bar, SRC_OUTPUT_DOUBLE_BUFFER + 0x40 * k, 16)]
+    sin = [s16(x) for x in window(bar, SRC_INPUT_FIFO + 0x80 * k, 32)]
+    log(event='snapshots', snaps=snaps)
+    log(event='result', fifo_out=out, src_output_double_buffer=dbuf, src_input_fifo=sin)
+    log(event='after', regs=regs(bar))
+    return out, dbuf, sin
+
+
+def clear(bar, log):
+    k, a, b = SRC_K, FIFO_IN, FIFO_OUT
+    w(bar, log, VDB_ACTIVE_SR, bar.rd(VDB_ACTIVE_SR) & ~(1 << RATE), 'vdb rate off')
+    w(bar, log, SRC_ACTIVE_SAMPLE_RATE, bar.rd(SRC_ACTIVE_SAMPLE_RATE) & ~(1 << RATE), 'src rate off')
+    w(bar, log, SRC_SR_HEADER + 4 * RATE, 0, 'src hdr: none')
+    w(bar, log, VDB_WTDRAM_HEADERLINKS + 4 * RATE, END, 'vdb hdr: none')
+    w(bar, log, VDB_WTDRAM_DESTLINKS + 4 * SRC_DSTADDR, END, 'vdb link: none')
+    w(bar, log, FIFO_VDB_CHANNEL_PC + 4 * a, 0, 'fifo a: off')
+    w(bar, log, FIFO_VDB_CHANNEL_PC + 4 * b, 0, 'fifo b: off')
+
+
+def vm_running():
+    try:
+        return any(open(f'/proc/{p}/comm').read().startswith('qemu') for p in os.listdir('/proc') if p.isdigit())
+    except OSError:
+        return False
+
+
+def arg(name, default, conv=lambda s: int(s, 0)):
+    return conv(sys.argv[sys.argv.index(name) + 1]) if name in sys.argv else default
+
+
+def main():
+    if len(sys.argv) < 2 or sys.argv[1] not in ('ram', 'run', 'sweep', 'clear'):
+        sys.exit(__doc__)
+    if vm_running():
+        sys.exit('a QEMU process is running; stop the VM first (this needs the card idle)')
+    bar = Bar()
+    if bar.rd(0x2a00c) == 0xffffffff:
+        sys.exit('the card reads 0xffffffff: not in D0 or memory decoding off (see appendix C)')
+    global OUT_DST
+    if '--alias' in sys.argv:
+        OUT_DST = 0x20 + FIFO_OUT
+    log = Log(arg('--log', 'srcprobe-log.jsonl', str))
+    cmd = sys.argv[1]
+    log(event='start', cmd=cmd, argv=sys.argv[1:], chip_ctrl=hex(bar.rd(0x2a00c)))
+    wing = arg('--wing', 13)
+    ratio = arg('--ratio', 0x4000)
+    if cmd == 'ram':
+        stage_ram(bar, log)
+    elif cmd == 'run':
+        setup(bar, log, arg('--frac', 0), wing, ratio)
+        flush_and_read(bar, log)
+        clear(bar, log)
+    elif cmd == 'sweep':
+        import numpy as np
+        step = arg('--step', 256)
+        fracs = list(range(0, 0x4000, step))
+        outs, dbufs = [], []
+        quiet = Log(os.devnull)
+        for f in fracs:
+            setup(bar, quiet, f, wing, ratio)
+            o, d, _ = flush_and_read(bar, quiet, reads=4)
+            clear(bar, quiet)
+            outs.append(o); dbufs.append(d)
+            log(event='sweep_point', frac=f, peak=max(o, key=abs), nonzero=sum(1 for x in o if x))
+        path = arg('--out', 'srcprobe-sweep.npz', str)
+        np.savez(path, fracs=np.array(fracs), fifo_out=np.array(outs), dbuf=np.array(dbufs), wing=wing, ratio=ratio)
+        log(event='saved', path=path, points=len(fracs))
+    elif cmd == 'clear':
+        clear(bar, log)
+
+
+if __name__ == '__main__':
+    main()

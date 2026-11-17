@@ -7,14 +7,15 @@
    circularly (see align). Windows that do not sum to the impulse (16384 +-8) or sit more
    than 5 LSB from the fit at any tap are dropped.
 2. For each tap of each phase, every reading is a vote: the tap itself in every sweep, and its
-   mirror (tap 25 - i of phase 16384 - p) in every sweep. The value with the most votes wins;
+   mirror (tap 25 - i of phase 16384 - p) in every sweep. Zeros are set aside when two readings
+   agree on a non-zero value (a missed output reads as 0). The value with the most votes wins;
    a tie goes to the value nearer the fit. Where nothing was read the fit, rounded, fills in
    (recorded in 'model_filled'); 'votes' and 'agree' record the support for each value.
 3. Keep phases 0-8192, replace isolated capture spikes (second difference along the phase of 3
    or more) by the mean of their neighbours ('smoothed'), and write the table, the 86Box header
    snd_vortex2_srctab.h (deltas along the phase, two per character) and, with --todo, the
-   fractions still worth measuring (each phase with a value filled, smoothed or without a
-   clear majority of readings, and its mirror), for
+   fractions still worth measuring (each phase with a value filled, smoothed, read only once
+   or without a clear majority, and its mirror), for
    'srcprobe.py sweep --phases'.
 """
 import sys
@@ -37,7 +38,9 @@ def align(path, K):
     outputs: the 26 taps and then six zeros. A capture that starts after the first taps came out
     still has them, 32 outputs later (the outer taps of 88 phases had been lost that way), and
     a capture's first outputs sometimes read 0 where their copy 32 later holds the value. Each row is read circularly: a tap's value is the one non-zero reading among its
-    output and the copies 32 before and after (0 if all are 0; dropped if they disagree). A window is aligned on its 18 middle taps (all
+    output and the copies 32 before and after (0 if all are 0; dropped if they disagree).
+    A capture that lost a sample puts its copies one place out; outer taps more than 3 from
+    the fit are dropped for that reason. A window is aligned on its 18 middle taps (all
     within 5 of the fit, which rejects the captures where two neighbouring outputs came out
     swapped); each outer tap is then kept if it too is within 5 of the fit."""
     d = np.load(path)
@@ -66,7 +69,10 @@ def align(path, K):
                 w[k] = vals.pop()
             elif not vals:
                 w[k] = 0
-        ok = (w != INV) & (np.abs(w - K[f]) <= 5)  # each outer tap kept on its own merits
+        # each outer tap kept on its own merits: within 3 of the fit (99% of the middle taps
+        # are within 2.8), which drops copies that a lost sample put one place out
+        tol = np.where((np.arange(26) < 4) | (np.arange(26) >= 22), 3, 5)
+        ok = (w != INV) & (np.abs(w - K[f]) <= tol)
         T[f] = np.where(ok, w, INV)
     return T
 
@@ -98,16 +104,22 @@ def main():
             if not c:
                 H[p][i] = int(round(K[p][i])); filled[p][i] = True
                 continue
+            nz = {x: n for x, n in c.items() if x}
+            if nz and max(nz.values()) >= 2:
+                # a capture that misses an output reads it as 0 (four sweeps: 2,843 of the
+                # minority readings were 0, against 331 non-zero); a value that two readings agree
+                # on outweighs any number of zeros
+                c = nz
             v = max(c, key=lambda x: (c[x], -abs(x - K[p][i])))
             H[p][i] = v; votes[p][i] = sum(c.values()); agree[p][i] = c[v]
-    H[0] = 0; H[0][12] = 16384; filled[0] = False
+    H[0] = 0; H[0][12] = 16384; filled[0] = False; agree[0] = votes[0] = 99   # exact by definition
     smoothed = np.zeros_like(filled)
     for _ in range(10):
         n = 0
         for k in range(26):
             v = H[:, k]
             for f in range(1, len(v) - 1):
-                if abs(2 * v[f] - v[f - 1] - v[f + 1]) >= 3:
+                if abs(2 * v[f] - v[f - 1] - v[f + 1]) >= 3 and agree[f, k] < 2:   # never overrule two agreeing readings
                     v[f] = int(round((v[f - 1] + v[f + 1]) / 2)); smoothed[f, k] = True; n += 1
         if not n:
             break
@@ -117,7 +129,7 @@ def main():
     np.savez_compressed(out_path, table=H.astype(np.int16), model_filled=filled, smoothed=smoothed,
                         votes=votes, agree=agree)
     if '--todo' in opt:
-        weak = (votes > 0) & (agree * 2 <= votes)      # no clear majority among the readings
+        weak = (agree < 2) | (agree * 2 <= votes)      # fewer than two agreeing readings, or no clear majority
         ph = sorted({q for p in np.where((filled | smoothed | weak).any(1))[0] for q in (int(p), (N - int(p)) % N)})
         open(opt['--todo'], 'w').write('\n'.join(f'{q:#06x}' for q in ph) + '\n')
         print(f'{len(ph)} fractions written to {opt["--todo"]}')

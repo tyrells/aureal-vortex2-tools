@@ -15,8 +15,8 @@ then idle and nothing else writes to it). Nothing here needs a guest or a driver
                            [--out FILE.npz] [--log FILE]
                                                   stage 3: 'run' for every S-th time fraction
                                                   (0..16383), saving each pass's output
-  sudo ./srcprobe.py release                      take the codec out of reset and start the AC-link
-                                                  (the chip's audio clock); a cold card has it held
+  sudo ./srcprobe.py release                      clear PCI_GCR bit 21 (a cold card holds still until
+                                                  it is cleared) and start the codec link
   sudo ./srcprobe.py ampsweep [--frac F] [--out FILE.npz]
                                                   one phase at 576 impulse heights (1-64, then every
                                                   64 to 32767), about 10 s
@@ -77,7 +77,7 @@ END = 0xffff
 
 SRC_K, FIFO_IN, FIFO_OUT = 0, 0, 1       # converter 0, VDB FIFOs 0 (in) and 1 (out)
 RATE = 17                                # sample-rate header: AC'97 (48 kHz; run 4: the only rate
-                                         # that ran once the codec was out of reset); --rate 0 = SRC0
+                                         # that ran once PCI_GCR bit 21 was cleared); --rate 0 = SRC0
 DMA_VDBCH_MODE = 0x27A00                 # + ch * 4: bits 17-14 format (8 = 16-bit), bit 13 1 = read
                                          # (memory to card), 0 = write (card to memory)
 SRC_SRCADDR = 0x20 + SRC_K               # VDB source address of the converter's output
@@ -174,7 +174,7 @@ def setup(bar, log, frac, wing, ratio, impulse_at=8, amp=0x4000, dmaptr=32, patt
     k, a, b = SRC_K, FIFO_IN, FIFO_OUT
     log(event='before', regs=regs(bar))
     if bar.rd(0x2a00c) & (1 << 21):
-        release(bar, log)                       # the clock only runs with the codec out of reset
+        release(bar, log)                       # nothing runs until PCI_GCR bit 21 is cleared
     # 1. VDB routes, not yet enabled: header SRCk -> FIFO a to SRC k in -> SRC k out to FIFO b
     w(bar, log, VDB_ACTIVE_SR, bar.rd(VDB_ACTIVE_SR) & ~(1 << RATE), 'vdb rate off')
     feed = a if SRC_FEED is None else SRC_FEED
@@ -309,13 +309,14 @@ def wake():
 
 def release(bar, log):
     """Run 3 on the card: nothing moved on either rate. A cold card's global control word
-    (PCI_GCR, 0x2a00c) reads 0x00303260, with bit 21 (External Reset, which drives the reset pin
-    of the AC'97 codec) set, and the codec supplies the AC-link bit clock (12.288 MHz), the chip's
-    audio clock. The Windows driver ends with the bit clear (0x01103260). This clears it and runs
-    the codec link start-up that ALSA's vortex_codec_init uses (CODEC_CTRL, 0x29184)."""
+    (PCI_GCR, 0x2a00c) reads 0x00303260, with bit 21 set; nothing runs until it is cleared (the
+    Windows driver leaves 0x01103260, the register map author's DOS driver writes 0x0010326f).
+    The chip's clock is its own 49.152 MHz crystal, not the codec (per the map's author); the
+    codec-link start-up below, from ALSA's vortex_codec_init (CODEC_CTRL, 0x29184), was done
+    alongside and is probably not needed."""
     GCR, CODEC_CTRL = 0x2a00c, 0x29184
     log(event='release_before', gcr=hex(bar.rd(GCR)), codec_ctrl=hex(bar.rd(CODEC_CTRL)))
-    w(bar, log, GCR, bar.rd(GCR) & ~(1 << 21), 'GCR: External Reset off (codec out of reset)')
+    w(bar, log, GCR, bar.rd(GCR) & ~(1 << 21), 'GCR: bit 21 off (the cold card holds still until it is cleared)')
     time.sleep(0.02)
     for v in (0x00a8, 0x80a8, 0x80e8, 0x80a8, 0x00a8, 0x00e8):
         w(bar, log, CODEC_CTRL, v, 'codec link start-up (ALSA sequence)')

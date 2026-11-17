@@ -381,8 +381,8 @@ def main():
         log(event='saved', path=path, points=len(fracs))
     elif cmd == 'clip':
         # what the converter does past full scale (wrap or saturate). At the half-sample phase the
-        # taps sum in absolute value to about 1.9, so 32 samples of +-A with the taps' signs give
-        # an output near 1.9 x A: at A = 0x3fff it fits, above it does not. Also a full-scale step
+        # taps sum in absolute value to 2.26, so 32 samples of +-A with the taps' signs give
+        # an output near 2.26 x A: at A = 0x2000 it fits (about 18,500), from 0x3fff up it does not. Also a full-scale step
         # (overshoot of about 9%) and the inverted patterns for the negative side.
         import numpy as np
         frac = 0x2000

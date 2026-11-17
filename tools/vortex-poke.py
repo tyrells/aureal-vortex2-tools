@@ -39,7 +39,8 @@ timestamp (the same clock as qemu-trace.log) for alignment.
   sudo ./vortex-poke.py wtsend --loop [--log FILE] [--hold SECS] [--min-age SECS]
                                                  the same sweep on any looping sound (Half-Life: stand next
                                                  to a generator or machinery hum): takes a second-half voice
-                                                 with DSREG clear that has played one sound for --min-age s
+                                                 with DSREG clear and a non-zero send that has played one
+                                                 sound for --min-age s
                                                  (4), 1.5 s per step (about 45 s); if the sound stops or the
                                                  voice is reused it waits for another loop and resumes
   sudo ./vortex-poke.py wtsend [--log FILE] [--hold SECS]
@@ -756,8 +757,9 @@ def _ws_find_tone(bar):
 
 
 def _ws_find_loop(bar, note, min_age, exclude=()):
-    """A second-half voice with DSREG clear that has kept the same sound (PARM0 and PARM3
-    unchanged) and kept running for min_age seconds: a looping sound, as in Half-Life."""
+    """A second-half voice with DSREG clear and a non-zero send that has kept the same sound
+    (PARM0 and PARM3 unchanged) and kept running for min_age seconds: a looping sound on the
+    send path. Voices with both sends 0 (A3D sources fed from a wavetable voice) are skipped."""
     seen = {}                                   # voice -> (key, first time)
     last_report = 0
     while True:
@@ -771,6 +773,9 @@ def _ws_find_loop(bar, note, min_age, exclude=()):
             live += 1
             base = WT_PARM(k)
             key = (bar.rd(base) & ~1, bar.rd(base + 12))
+            if not key[1] & 0x3fff:             # both sends 0: an A3D source's input, not the send path
+                seen.pop(k, None)
+                continue
             if k not in seen or seen[k][0] != key:
                 seen[k] = (key, now)
             elif now - seen[k][1] >= min_age:

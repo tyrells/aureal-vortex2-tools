@@ -171,7 +171,23 @@ BLOCK_REGS = (0x29800, 0x29804, 0x29820, 0x29828, 0x2982c, 0x29830, 0x29840, 0x2
               0x2984c, 0x29850, 0x29854, 0x29858, 0x2985c)
 
 
+def io_space_on():
+    """The legacy decodes answer only with I/O space enabled in the card's PCI COMMAND register
+    (AU30DOS sets bits 0 and 2 itself). srcprobe's wake() turns on memory decoding only, and
+    after a power cycle with no VM run since, I/O decoding is off: run 2 and 3 of fmflag read
+    0xff at 388h whatever was written. The earlier FM runs came after the VM had run."""
+    path = f'/sys/bus/pci/devices/{sp.DEV}/config'
+    with open(path, 'r+b') as f:
+        f.seek(4); cmd = int.from_bytes(f.read(2), 'little')
+        if not cmd & 1:
+            f.seek(4); f.write((cmd | 1).to_bytes(2, 'little'))
+        return cmd
+
+
 def port_io():
+    old = io_space_on()
+    if not old & 1:
+        print(f'I/O decoding was off (COMMAND {old:#06x}); turned it on')
     fd = os.open('/dev/port', os.O_RDWR)
     return fd, (lambda a: os.pread(fd, 1, a)[0]), (lambda a, v: os.pwrite(fd, bytes([v]), a))
 

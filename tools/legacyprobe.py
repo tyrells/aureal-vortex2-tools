@@ -150,7 +150,20 @@ def game(bar, log, seconds):
     w(bar, log, CTRL2, bar.rd(CTRL2) & ~CTRL2_ADC, 'ctrl2: game port legacy mode')
 
 
+def io_space_on(log):
+    # The legacy decodes answer only with I/O space on in the card's PCI COMMAND register
+    # (sbprobe fmflag, 2026-11-18); srcprobe's wake() turns on memory decoding only, so the
+    # first run of this command (2026-11-17) may have had it off.
+    path = f'/sys/bus/pci/devices/{sp.DEV}/config'
+    with open(path, 'r+b') as f:
+        f.seek(4); cmd = int.from_bytes(f.read(2), 'little')
+        if not cmd & 1:
+            f.seek(4); f.write((cmd | 1).to_bytes(2, 'little'))
+    log(event='io_space', command_before=hex(cmd), turned_on=not cmd & 1)
+
+
 def ports(bar, log):
+    io_space_on(log)
     try:
         fd = os.open('/dev/port', os.O_RDWR)
     except OSError as e:

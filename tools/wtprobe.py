@@ -31,6 +31,10 @@ Run on the X79 host with the card bound to vfio-pci and no VM running, like srcp
                                              the map's author): a smooth mute at five mute-ramp settings, then an
                                              attack from hard mute at each candidate state code, slope and attack-
                                              ramp setting, each watched for 0.4 s (about a minute)
+  sudo ./wtprobe.py filtrate [--out FILE.npz] the low-pass against the voice's half and playback rate:
+                                             impulses through four cut-offs at 48, 44.1 and 22.05 kHz
+                                             rates, on second-half voice 8 and first-half voice 0
+                                             (about 10 s)
   sudo ./wtprobe.py clear
 
 The chain: a second-half voice (global 40, local 8) with DSREG clear, so it plays onto its half's
@@ -75,6 +79,25 @@ ALL = {'ds_left': 0xa0, 'ds_right': 0xa1, **BUSES, 'own': 0x80 + LV}   # own: th
 LEVEL = 0x4000
 
 
+def set_voice(v):
+    """Point the probe at another voice (global number 0-63): the reflection voices are first-half
+    voices 0-3, the voice measured so far second-half voice 8 (global 40)."""
+    global VOICE, LV, BANK, WT_CTRL, WT_SRAMP, WT_DSREG, WT_SYNC, WT_RUN, WT_PARM, WT_FIFO_DATA
+    global WT_FIFO_PC, WTDMA_CTRL, WTDMA_STAT, BUSES, ALL
+    VOICE, LV, BANK = v, v % 32, (v // 32) * 0x8000
+    WT_CTRL, WT_SRAMP, WT_DSREG = BANK + 0x0, BANK + 0x4, BANK + 0x8
+    WT_SYNC = BANK + 0x80 + (LV // 2) * 4
+    WT_RUN = BANK + 0x180 + LV * 4
+    WT_PARM = BANK + 0x200 + LV * 0x10
+    WT_FIFO_DATA = 0x10000 + VOICE * 0x100
+    WT_FIFO_PC = 0x16000 + VOICE * 4
+    WTDMA_CTRL = 0x27900 + VOICE * 4
+    WTDMA_STAT = 0x27d00 + VOICE * 4
+    out = 0xa0 if v >= 32 else 0x60                  # first output of the half: 32/33, 34/35, 36/37
+    BUSES = {'left': out + 2, 'right': out + 3, 'reverb': out + 4, 'chorus': out + 5}
+    ALL = {'ds_left': out, 'ds_right': out + 1, **BUSES, 'own': (0x80 if v >= 32 else 0x40) + LV}
+
+
 def parm3(pan, cho, rev):
     return (0xcf << 24) | (7 << 21) | ((pan & 0x7f) << 14) | ((cho & 0x7f) << 7) | (rev & 0x7f)
 
@@ -90,7 +113,7 @@ def mute_others(bar, log):
 
 
 def voice_setup(bar, log, pan, cho, rev, ds=False, gain=0xcf, level=None, ingain=0xcf, state=7, filt=0xcf,
-                pattern=None, fb=0):
+                pattern=None, fb=0, rate=0xa000):
     w = sp.w
     w(bar, log, WT_FIFO_PC, 0, 'wt fifo: off')
     for i in range(64):
@@ -105,8 +128,8 @@ def voice_setup(bar, log, pan, cho, rev, ds=False, gain=0xcf, level=None, ingain
         w(bar, log, WT_DSREG, bar.rd(WT_DSREG) & ~(1 << LV), 'DSREG: voice clear (main pair and sends)')
     w(bar, log, WT_SYNC, 0, 'pair sync off')
     w(bar, log, WTDMA_CTRL, 0x22000, 'wt dma: signed 16-bit')
-    w(bar, log, WT_PARM + 0, (filt << 24) | 0xa000 | (gain << 16), 'PARM0: filter open, gain, 48 kHz (direct pair: left gain)')
-    w(bar, log, WT_PARM + 4, (filt << 24) | 0xa001 | (gain << 16), 'PARM1: same, state bit differing (direct pair: right gain)')
+    w(bar, log, WT_PARM + 0, (filt << 24) | (rate & 0xfffe) | (gain << 16), f'PARM0: filter {filt:#04x}, gain, rate {rate:#06x} (direct pair: left gain)')
+    w(bar, log, WT_PARM + 4, (filt << 24) | (rate & 0xfffe) | 1 | (gain << 16), 'PARM1: same, state bit differing (direct pair: right gain)')
     w(bar, log, WT_PARM + 8, (fb & 0xffff) << 16, f'PARM2: feedback {fb:#06x}, phase 0')
     w(bar, log, WT_PARM + 12, (parm3(pan, cho, rev) & 0x001fffff) | (state << 21) | (ingain << 24), f'PARM3: input gain {ingain:#04x} pan {pan:#04x} chorus {cho:#04x} reverb {rev:#04x}')
     w(bar, log, WT_RUN, 0, 'running flag (driver writes 0)')
@@ -122,11 +145,11 @@ def voice_stop(bar, log):
 
 
 def capture_bus(bar, log, bus, pan, cho, rev, ds=False, gain=0xcf, level=None, go=True, ingain=0xcf, state=7, filt=0xcf,
-                pattern=None, fb=0):
+                pattern=None, fb=0, rate=0xa000):
     sp.SRC_FEED = ALL[bus]
     sp.setup(bar, log, 0, 13, 0x4000, pattern=[0] * 64)
     voice_setup(bar, log, pan, cho, rev, ds=ds, gain=gain, level=level, ingain=ingain, state=state, filt=filt,
-                pattern=pattern, fb=fb)
+                pattern=pattern, fb=fb, rate=rate)
     if go:
         voice_go(bar)
     r, _, _ = sp.flush_and_read(bar, log, flush=False)
@@ -296,7 +319,7 @@ def ramp_summary(out, t_fire):
 
 def main():
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
-    if cmd not in ('start', 'bus', 'sweep', 'levels', 'gains', 'state', 'mix', 'own', 'reso', 'ramp', 'clear'):
+    if cmd not in ('start', 'bus', 'sweep', 'levels', 'gains', 'state', 'mix', 'own', 'reso', 'ramp', 'filtrate', 'clear'):
         sys.exit(__doc__)
     if sp.vm_running():
         sys.exit('a QEMU process is running; stop the VM first (this needs the card idle)')
@@ -457,6 +480,36 @@ def main():
         path = sp.arg('--out', 'wtprobe-reso.npz', str)
         np.savez(path, rows=np.array(rows))
         log(event='saved', path=path)
+    elif cmd == 'filtrate':
+        # The low-pass against the voice's half and its playback rate. A 3.0 replay (manual
+        # reflections, 2026-11-17) put the card's reflections up to 11 dB above the model at
+        # 0.8-1.6 kHz, as if the cut-off byte 0xa1 acted like 0xb1 (twice the coefficient), on
+        # first-half voices 0-3 playing a 44.1 kHz source (rate 0x9acc) through the sends. The
+        # filter law was measured on second-half voice 8 at 48 kHz (0xa000). Here: an impulse
+        # every 64 FIFO words through each cut-off, at three rates, on both voices, read on the
+        # direct-stream pair (pan 0), plus the reverb send at the reflections' settings.
+        import numpy as np
+        imp = [0x2000] + [0] * 63
+        rows = []
+        for v in (40, 0):
+            set_voice(v)
+            mute_others(bar, log)
+            for rate in (0xa000, 0x9acc, 0x7a1c):
+                for filt in (0xa1, 0xb1, 0xc0, 0xcf):
+                    cases = [('ds_left', True, 0, 0x7f, 0x7f)]
+                    if filt == 0xa1:
+                        cases.append(('reverb', False, 0x3f, 0x7f, 0x7f))
+                    for bus, ds, pan, cho, rev in cases:
+                        lv, r = capture_bus(bar, quiet, bus, pan, cho, rev, ds=ds, filt=filt, pattern=imp, rate=rate)
+                        rows.append((v, rate, filt, 0 if ds else 1, *((r + [0] * 160)[:160])))
+                        log(event='filtrate', voice=v, rate=hex(rate), filt=hex(filt), bus=bus,
+                            peak=max(rows[-1][4:], key=abs), head=[x for x in rows[-1][4:] if x][:16])
+            for lv in range(32):                      # leave the half as the driver would find it
+                bar.wr(BANK + 0x200 + lv * 0x10 + 12, 0)
+        set_voice(40)
+        path = sp.arg('--out', 'wtprobe-filtrate.npz', str)
+        np.savez(path, rows=np.array(rows))
+        log(event='saved', path=path, cases=len(rows))
     elif cmd == 'ramp':
         # Smooth mute: a voice playing at gain 0xcf, state 7, then 1 written to its mute word
         # (ALSA's layout) or to its bit in voice 0's word (the description's 'one bit per voice').

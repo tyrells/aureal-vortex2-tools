@@ -1,0 +1,176 @@
+#!/usr/bin/env python3
+"""Look for the Vortex 2's Sound Blaster hardware on an idle card, from the Linux host.
+
+Run on the X79 host with the card bound to vfio-pci and no VM running, like srcprobe.py.
+
+  sudo ./sbprobe.py scan  [--log FILE]   read the unexplored blocks (0x29800-0x29fff, 0x2a800-0x2a8ff)
+                                         three times at rest: what each word holds, and which
+                                         change on their own
+  sudo ./sbprobe.py setup [--log FILE]   replay AU30DOS.COM's boot-time writes one step at a time,
+                                         as traced (sbpro session, 2026-11-01), and after each step
+                                         read 0x28000-0x2b44f and log every word that changed;
+                                         then the Windows driver's write to 0x2a804; then put the
+                                         control words back
+  sudo ./sbprobe.py bits  [--log FILE]   which bits of each word in 0x29800-0x299ff and
+                                         0x2a800-0x2a83f hold a value: write all ones, then zero,
+                                         read back each, put the old value back
+  sudo ./sbprobe.py ports [--log FILE]   with AU30DOS's control word set, read I/O ports 0x220-0x22f
+                                         and 0x388-0x38b through /dev/port, and try a DSP reset at
+                                         0x226. Only useful if the chipset forwards those legacy
+                                         addresses to the card's slot; all 0xff means it does not
+                                         (as with the MPU-401 and game port on this machine)
+  sudo ./sbprobe.py clear
+
+Why: with Sound Blaster emulation on, AU30DOS.COM runs from AUTOEXEC.BAT before Windows and
+writes a block nobody has looked at: 0x29808 = 5 (the emulation's IRQ is 5), 0x2980c = 0,
+0x29854 = 0xc00, clears 0x29900-0x299ec, and leaves ASCII '0's (0x30) at 0x2995c-0x29964 and
+0x299d4-0x299dc. The word at 0x29850 reads 0x302, which is also the DSP version the emulation
+reports (3.02). It then sets the control word to 0x0118326e (bits 1, 2, 3, 19 and 24 over
+reset; bit 0 and bit 14 follow), and the Windows driver later writes 0x212eb to 0x2a804. If
+the chip has Sound Blaster hardware (a DSP port block or legacy decode for 220h), it should
+show up here; if AU30DOS only traps the ports through EMM386, these words are the driver's
+own bookkeeping and nothing else will move.
+"""
+import importlib.util
+import os
+import sys
+import time
+
+here = os.path.dirname(os.path.abspath(__file__))
+spec = importlib.util.spec_from_file_location('srcprobe', os.path.join(here, 'srcprobe.py'))
+sp = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(sp)
+
+CTRL, IRQ_CTRL, X804 = 0x2a00c, 0x2a004, 0x2a804
+MIDI_DATA = 0x28800                      # reading it takes a byte from the MPU-401: skipped
+BLOCKS = [(0x29800, 0x2a000), (0x2a800, 0x2a900)]
+WIDE = (0x28000, 0x2b450)                # for the diffs: routes, MPU/game, codec, timers, control, EQ
+SKIP = {MIDI_DATA}
+
+# AU30DOS.COM's writes outside the shared audio set-up (routes, converters, mixer, DMA, codec),
+# in trace order. The audio set-up is left out: it plays a short buffer, which needs host memory.
+AU30DOS = [
+    ('0x29808 = 5, 0x2980c = 0', [(0x29808, 0x5), (0x2980c, 0x0)]),
+    ('ASCII zeros, first pass', [(0x299d4, 0x30303000), (0x299d8, 0x30303030), (0x299dc, 0x00003030),
+                                 (0x2995c, 0x30303000), (0x29960, 0x30303030), (0x29964, 0x00003030)]),
+    ('clear 0x29900-0x299ec', [(a, 0) for a in range(0x299ec, 0x298fc, -4)]),
+    ('ASCII zeros again', [(0x299d4, 0x30303000), (0x299d8, 0x30303030)]),
+    ('0x29854 = 0xc00', [(0x29854, 0xc00)]),
+    ('0x22040 = 0x24 (parallel interface)', [(0x22040, 0x24)]),
+    ('control word 0x0118326e', [(CTRL, 0x0118326e)]),
+    ('control word bit 0 (MIDI enable): 0x0118326f', [(CTRL, 0x0118326f)]),
+    ('control word bit 14: 0x0118726f', [(CTRL, 0x0118726f)]),
+    ('Windows driver: 0x2a804 = 0x212eb', [(X804, 0x212eb)]),
+]
+
+
+def read_range(bar, lo, hi):
+    return {a: bar.rd(a) for a in range(lo, hi, 4) if a not in SKIP}
+
+
+def diff(before, after):
+    return {hex(a): [hex(before[a]), hex(after[a])] for a in before if before[a] != after[a]}
+
+
+def scan(bar, log):
+    takes = []
+    for _ in range(3):
+        takes.append({a: v for lo, hi in BLOCKS for a, v in read_range(bar, lo, hi).items()})
+        time.sleep(0.05)
+    live = sorted(a for a in takes[0] if len({t[a] for t in takes}) > 1)
+    nonzero = {hex(a): hex(v) for a, v in takes[0].items() if v not in (0, 0xffffffff)}
+    fill = {}
+    for a, v in takes[0].items():
+        fill.setdefault(hex(v), 0)
+        fill[hex(v)] += 1
+    log(event='scan', live=[hex(a) for a in live], nonzero=nonzero,
+        common=sorted(fill.items(), key=lambda kv: -kv[1])[:8])
+
+
+def setup(bar, log):
+    keep = {a: bar.rd(a) for a in (CTRL, IRQ_CTRL, X804, 0x29808, 0x2980c, 0x29854, 0x22040)}
+    log(event='setup_before', regs={hex(a): hex(v) for a, v in keep.items()})
+    # words that move on their own, so they can be left out of the diffs
+    t0 = read_range(bar, *WIDE); time.sleep(0.05); t1 = read_range(bar, *WIDE)
+    live = {a for a in t0 if t0[a] != t1[a]}
+    log(event='live', words=[hex(a) for a in sorted(live)])
+    prev = t1
+    for name, writes in AU30DOS:
+        for a, v in writes:
+            bar.wr(a, v)
+        time.sleep(0.02)
+        now = read_range(bar, *WIDE)
+        d = {k: v for k, v in diff(prev, now).items() if int(k, 16) not in live}
+        log(event='step', step=name, wrote=[(hex(a), hex(v)) for a, v in writes][:8],
+            readback=[(hex(a), hex(bar.rd(a))) for a, _ in writes][:8], changed=d)
+        prev = now
+    # put the control words back (the block's own words are left as AU30DOS left them; they
+    # are what a card with the emulation on holds anyway)
+    for a in (X804, CTRL, IRQ_CTRL):
+        sp.w(bar, log, a, keep[a], 'restore')
+
+
+def bits(bar, log):
+    out = {}
+    for lo, hi in ((0x29800, 0x29a00), (0x2a800, 0x2a840)):
+        for a in range(lo, hi, 4):
+            old = bar.rd(a)
+            bar.wr(a, 0xffffffff); ones = bar.rd(a)
+            bar.wr(a, 0); zeros = bar.rd(a)
+            bar.wr(a, old); back = bar.rd(a)
+            if ones != old or zeros != old:
+                out[hex(a)] = dict(old=hex(old), ones=hex(ones), zeros=hex(zeros), restored=hex(back))
+    log(event='bits', writable=out, count=len(out))
+
+
+def ports(bar, log):
+    try:
+        fd = os.open('/dev/port', os.O_RDWR)
+    except OSError as e:
+        log(event='ports', error=str(e))
+        return
+    inb = lambda a: os.pread(fd, 1, a)[0]
+    outb = lambda a, v: os.pwrite(fd, bytes([v]), a)
+    old = bar.rd(CTRL)
+    for word in (old, 0x0118326e, 0x0118726f):
+        bar.wr(CTRL, word)
+        time.sleep(0.01)
+        sb = {hex(a): hex(inb(a)) for a in range(0x220, 0x230)}
+        fm = {hex(a): hex(inb(a)) for a in range(0x388, 0x38c)}
+        outb(0x226, 1); time.sleep(0.0001); outb(0x226, 0); time.sleep(0.001)
+        log(event='ports', ctrl=hex(word), sb=sb, fm=fm,
+            after_reset={'0x22a': hex(inb(0x22a)), '0x22e': hex(inb(0x22e))},
+            block={hex(a): hex(bar.rd(a)) for a in (0x29800, 0x29804, 0x29808, 0x2980c, 0x29850, 0x29854)})
+    sp.w(bar, log, CTRL, old, 'ctrl: restored')
+    os.close(fd)
+
+
+def main():
+    cmd = sys.argv[1] if len(sys.argv) > 1 else ''
+    if cmd not in ('scan', 'setup', 'bits', 'ports', 'clear'):
+        sys.exit(__doc__)
+    if sp.vm_running():
+        sys.exit('a QEMU process is running; stop the VM first (this needs the card idle)')
+    sp.wake()
+    bar = sp.Bar()
+    if bar.rd(CTRL) == 0xffffffff:
+        sys.exit('the card reads 0xffffffff; see srcprobe.py')
+    log = sp.Log(sp.arg('--log', 'sbprobe-log.jsonl', str))
+    log(event='start', cmd=cmd, argv=sys.argv[1:], chip_ctrl=hex(bar.rd(CTRL)))
+    if bar.rd(CTRL) & (1 << 21):
+        sp.release(bar, log)
+    if cmd == 'scan':
+        scan(bar, log)
+    elif cmd == 'setup':
+        setup(bar, log)
+    elif cmd == 'bits':
+        bits(bar, log)
+    elif cmd == 'ports':
+        ports(bar, log)
+    elif cmd == 'clear':
+        sp.w(bar, log, X804, 0, '0x2a804: 0')
+        sp.w(bar, log, CTRL, bar.rd(CTRL) & ~((1 << 24) | 0x4007), 'ctrl: legacy bits off')
+
+
+if __name__ == '__main__':
+    main()

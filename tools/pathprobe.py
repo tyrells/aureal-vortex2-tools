@@ -6,7 +6,7 @@ Run on the X79 host with the card bound to vfio-pci and no VM running, like srcp
   sudo ./pathprobe.py eq [--log FILE]        the hardware EQ alone (VDB sink 0xa0 -> source 0x7e),
                                              the driver's coefficients with the bypass and band
                                              gains set in turn (current and target alike)
-  sudo ./pathprobe.py paths [--out FILE.npz] [--log FILE]
+  sudo ./pathprobe.py paths [--slot S] [--out FILE.npz] [--log FILE]
                                              the two paths that the 3D level was measured between,
                                              each read at mixer 0's output (what goes to the
                                              codec's left channel), with every register the
@@ -46,10 +46,12 @@ MIX_EN = 0x21a00        # + ((mix << 3) + (in >> 2)) * 4, bit in & 3
 MIX_IN_T, MIX_IN_C = 0x21000, 0x20000
 MIX_OUT_T, MIX_OUT_C = 0x21800, 0x20800
 XT_CTRL = 0x24660
-SLICE3 = 0x1fc00
-SLOT = 14               # slice 3, source 2: the driver's first 3D slot
-A_B = lambda s: 0x19000 + 3 * 0x2000 + s * 0x2c8
-A_A = lambda s: 0x18000 + 3 * 0x2000 + s * 0x3a4
+SLOT = int(sp.arg('--slot', 14))   # 14 (slice 3, source 2) is the driver's first 3D slot
+SL = SLOT >> 2
+SLICE3 = 0x19c00 + SL * 0x2000      # the slot's slice registers
+A_B = lambda s: 0x19000 + SL * 0x2000 + s * 0x2c8
+A_A = lambda s: 0x18000 + SL * 0x2000 + s * 0x3a4
+SNAP_B, SNAP_A = 0x1f590, 0x1e748   # where the driver's slot 14 sat in the snapshot
 
 
 def words(name):
@@ -130,7 +132,7 @@ def xt_setup(bar, log):
     ctl = int(SNAP['xt_ctl'], 16) & 0x3ffff
     # only the input on the path (slice 3 left is canceller input 3), so nothing held leaks in
     for i in range(10):
-        if i != 3:
+        if i != SL:
             bar.wr(0x244d0 + 4 * i, 0)
     sp.w(bar, log, XT_CTRL, 0xc0840088 | (ctl & 0x3ff00), 'xt control: rate 17')
     sp.w(bar, log, XT_CTRL, 0xd0840089 | (ctl & 0x3ff00), 'xt control: enable')
@@ -143,10 +145,13 @@ def a3d_setup(bar, log):
         for off in range(0, 0x3a4, 4):
             bar.wr(A_A(s) + off, 0)
     src = SLOT & 3
-    lo, hi = A_B(src), A_B(src) + 0x2c8
-    loa, hia = A_A(src), A_A(src) + 0x3a4
     w = words('a3d_slice3')
-    load(bar, {a: v for a, v in w.items() if lo <= a < hi or loa <= a < hia})
+    # the driver's slot 14 words, moved to the slot under test
+    for a, v in w.items():
+        if SNAP_B <= a < SNAP_B + 0x2c8:
+            bar.wr(A_B(src) + a - SNAP_B, v)
+        elif SNAP_A <= a < SNAP_A + 0x3a4:
+            bar.wr(A_A(src) + a - SNAP_A, v)
     b = A_B(src)
     # start from the targets (the driver's currents may be mid-glide), halves as the chip keeps them
     swap = lambda v: ((v & 0xffff) << 16) | (v >> 16)
@@ -166,7 +171,7 @@ def a3d_setup(bar, log):
     sp.w(bar, log, SLICE3 + 0x40, 0, 'slice pointers 0')
     sp.w(bar, log, SLICE3 + 0x38, 0xb8000088, 'slice control: rate 17 (driver value)')
     sp.w(bar, log, SLICE3 + 0x38, 0xf0000001, 'slice control: enable (driver value)')
-    log(event='a3d', gain=[hex(bar.rd(b + 0xe0)), hex(bar.rd(b + 0xe4))], b01=hex(bar.rd(b + 0xf4)),
+    log(event='a3d_after_enable', gain=[hex(bar.rd(b + 0xe0)), hex(bar.rd(b + 0xe4))], b01=hex(bar.rd(b + 0xf4)),
         a12=hex(bar.rd(b + 0xec)), itd=hex(bar.rd(b + 0x1e4)), taps=[hex(bar.rd(b + 0x100 + 4 * k)) for k in range(4)])
 
 
@@ -201,7 +206,7 @@ def plateau(r):
 F, S = sp.FIFO_IN, sp.SRC_DSTADDR
 NATIVE = [(F, 0x66), (0x34, 0x51), (0x36, EQ_IN), (EQ_OUT, 0x57), (0x30, S)]     # mixin 22 -> mix 4 -> mixin 1 -> mix 6 -> EQ -> mixin 7 -> mix 0
 NATIVE_EN = [(4, 22), (6, 1), (0, 7)]
-THREED = [(F, 0x70 + SLOT), (0xa6 + 2 * (SLOT >> 2), 0x99), (0x66, 0x5b), (0x30, S)]  # A3D 14 -> slice 3 L -> canceller in 3 -> mixin 11 -> mix 0
+THREED = [(F, 0x70 + SLOT), (0xa6 + 2 * SL, 0x96 + SL), (0x66, 0x5b), (0x30, S)]  # A3D slot -> its slice's left output -> canceller input (slice) -> mixin 11 -> mix 0
 THREED_EN = [(0, 11)]
 
 
@@ -242,9 +247,9 @@ def main():
             run(f'3D, {pname}', THREED, pat, lambda: (mixer_setup(bar, log, THREED_EN), xt_setup(bar, log), a3d_setup(bar, log)))
             a3d_off(bar, log)
             # the 3D path's pieces: slice output alone, and canceller output alone
-            run(f'3D to slice output, {pname}', [(F, 0x70 + SLOT), (0xa6 + 2 * (SLOT >> 2), S)], pat, lambda: a3d_setup(bar, log))
+            run(f'3D to slice output, {pname}', [(F, 0x70 + SLOT), (0xa6 + 2 * SL, S)], pat, lambda: a3d_setup(bar, log))
             a3d_off(bar, log)
-            run(f'3D to canceller output, {pname}', [(F, 0x70 + SLOT), (0xa6 + 2 * (SLOT >> 2), 0x99), (0x66, S)], pat,
+            run(f'3D to canceller output, {pname}', [(F, 0x70 + SLOT), (0xa6 + 2 * SL, 0x96 + SL), (0x66, S)], pat,
                 lambda: (xt_setup(bar, log), a3d_setup(bar, log)))
             a3d_off(bar, log)
         path = sp.arg('--out', 'pathprobe.npz', str)

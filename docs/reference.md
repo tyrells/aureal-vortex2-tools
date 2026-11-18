@@ -391,6 +391,8 @@ So quad mode is a front/rear crossfade done by the driver with ordinary mixer ga
 - **Gain tracking (Plausible, Aureal's description).** Gains are 1.15 fractions; each sample the current gain moves by half the tracking rate times the distance to the target (current += 0.5 × rate × (target − current)), with the rate also a 1.15 fraction and 0 turning tracking off.
 - **`+0x2c` is a band's target gain and `+0x28` its current gain, which glides to the target by itself (Confirmed, run 16).** After `+0x28` = 0 and `+0x2c` = `0x3e96` were written, `+0x28` read `0x48` at once, `0x3783` 100 ms later and `0x3e96` by 200 ms. The emulator uses `+0x2c` directly, which is right once the glide ends.
 
+- **Read digitally (Confirmed, `pathprobe`, 2026-11-17).** With current and target set alike: the bypass alone passes the input exactly (`0x7fff` 8,192 → 8,192, `0x3fff` → 4,096, `0x8001` → −8,192); band 5 at `0x3e96` with the bypass added its band-pass on top (impulse 16,384 → 16,935, the extra 551 being b0 × gain); and the driver's ten band sections, read in the middle of a glide, summed to the model's arithmetic within 0.3% sample by sample. Not understood yet: with the bypass at 0, the bands alone gave silence when fed straight from a FIFO, but their normal sum when fed through mixer 6. Data: `data/pathprobe-20261117-1-eq.jsonl`, `data/pathprobe-20261117-2-eq.jsonl`.
+
 For an emulator driven by the Windows driver, a pass-through is exact; the band model above covers anything that programs the EQ itself.
 
 ### What the driver receives from the A3D library

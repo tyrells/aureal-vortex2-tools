@@ -14,6 +14,8 @@ Run on the X79 host with the card bound to vfio-pci and no VM running, like srcp
                                 input level (down to 1 LSB, for the rounding) and sign, gain,
                                 tap value and position, which half of each word is which ear,
                                 the atmospheric filter's b0, the ITD, and overload
+  sudo ./a3dprobe.py atmos [--slot S] [--out FILE.npz] [--log FILE]
+                                where the distance filter's a2 and b1/b2 sit (12 cases)
   sudo ./a3dprobe.py clear [--slot S]
 
 The chain: VDB FIFO 0, preloaded by the host, -> A3D input of slot S (VDB sink 0x70 + S) ->
@@ -82,7 +84,7 @@ def zero_source(bar, src):
 
 
 def source_setup(bar, log, taps=None, gain=(0x7fff, 0x7fff), atmos=(0, 0, 0x4000, 0, 0), itd=(0, 0),
-                 swap_cur=False):
+                 swap_cur=False, raw=None, tc=(0, 0, 0, 0)):
     """taps: {index: (left, right)}, default tap 0 = 0x7fff both ears. atmos: a1, a2, b0, b1, b2.
     The targets take each pair as low half = left; the currents as the driver writes them at a
     start (run 4: B01Current 0x40000000 against B10Target 0x00004000, so b0 in the high half);
@@ -110,8 +112,10 @@ def source_setup(bar, log, taps=None, gain=(0x7fff, 0x7fff), atmos=(0, 0, 0x4000
     w(bar, log, b + 0x1e0, pair(itd[1], itd[0]) if not swap_cur else pair(itd[0], itd[1]), 'ITDCurrent')
     w(bar, log, b + 0x1e4, pair(itd[0], itd[1]), 'ITDTarget')
     log(event='taps', current=[hex(bar.rd(b + 4 * k)) for k in range(4)], target=[hex(bar.rd(b + 0x100 + 4 * k)) for k in range(4)])
+    for off, v in (raw or {}).items():
+        w(bar, log, b + off, v, f'raw bank B +{off:#x}')
     for i in range(4):
-        w(bar, log, bank_a(SOURCE) + 0x37c + 4 * i, 0, 'tracking rate off')
+        w(bar, log, bank_a(SOURCE) + 0x37c + 4 * i, tc[i], 'tracking rate')
     w(bar, log, SL_PTR, 0, 'slice pointers 0 (driver init)')
     w(bar, log, SL_CTRL, 0xb8000088, 'slice control: rate 17 (driver value)')
     w(bar, log, SL_CTRL, 0xf0000001, 'slice control: enable (driver value)')
@@ -187,7 +191,7 @@ def cases():
 
 def main():
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
-    if cmd not in ('pipe', 'sweep', 'clear'):
+    if cmd not in ('pipe', 'sweep', 'atmos', 'clear'):
         sys.exit(__doc__)
     if sp.vm_running():
         sys.exit('a QEMU process is running; stop the VM first (this needs the card idle)')
@@ -222,6 +226,39 @@ def main():
         path = sp.arg('--out', 'a3dprobe-sweep.npz', str)
         np.savez(path, rows=np.array(rows), names=np.array(names))
         log(event='saved', path=path, cases=len(names))
+    elif cmd == 'atmos':
+        # pathprobe run 2: the driver's distance filter (b0 0x00fe, a1 0x700a, a2 0xcef7, a stable
+        # low-pass) grew on the card by 1.75 a sample, as if a2 were not applied. Where is a2?
+        import numpy as np
+        D = dict(a1=0x700a, a2=0xcef7, b0=0x00fe)
+        cs = [
+            ('a1 0x2000 (control: pole 0.5)', impulse(), dict(atmos=(0x2000, 0, 0x4000, 0, 0))),
+            ('a2 0x2000 via A12Current low half', impulse(), dict(atmos=(0, 0x2000, 0x4000, 0, 0))),
+            ('a2 -0x2000 via A12Current low half', impulse(), dict(atmos=(0, -0x2000 & 0xffff, 0x4000, 0, 0))),
+            ('raw A12Current 0x00002000', impulse(), dict(raw={0xe8: 0x00002000})),
+            ('raw A12Current 0x20000000', impulse(), dict(raw={0xe8: 0x20000000})),
+            ('raw B2Current 0x00002000 (low half)', impulse(), dict(raw={0xf8: 0x00002000})),
+            ('raw B2Current 0x20000000 (high half: b2?)', impulse(), dict(raw={0xf8: 0x20000000})),
+            ('raw B01Current 0x40002000 (b1 in low half?)', impulse(), dict(raw={0xf0: 0x40002000})),
+            ('a1 0x4000 a2 -0x2000 (poles 0.5 +- 0.5j)', impulse(), dict(atmos=(0x4000, -0x2000 & 0xffff, 0x4000, 0, 0))),
+            ('driver set as currents, step', const(0x2000), dict(atmos=(D['a1'], D['a2'], D['b0'], 0, 0))),
+            ('driver set as currents, impulse', impulse(), dict(atmos=(D['a1'], D['a2'], D['b0'], 0, 0))),
+            ('driver set as targets only, driver tracking rates, step', const(0x2000),
+             dict(atmos=(0, 0, 0x4000, 0, 0), tc=(0x147, 0x300, 0x300, 0xc8),
+                  raw={0xec: (D['a2'] << 16) | D['a1'], 0xf4: D['b0'], 0xe8: 0, 0xf0: 0x40000000})),
+        ]
+        rows, names = [], []
+        for name, pat, kw in cs:
+            res = []
+            for right in (False, True):
+                r, regs = capture(bar, quiet, right, pat, **kw)
+                rows.append((len(names), int(right), *((r + [0] * 160)[:160])))
+                res.append([(i, x) for i, x in enumerate(r) if x][:20])
+            log(event='atmos', n=len(names), case=name, first_left=res[0], first_right=res[1])
+            names.append(name)
+        path = sp.arg('--out', 'a3dprobe-atmos.npz', str)
+        np.savez(path, rows=np.array(rows), names=np.array(names))
+        log(event='saved', path=path)
     elif cmd == 'clear':
         unroute(bar, log)
         sp.w(bar, log, SL_CTRL, 0, 'slice control 0')

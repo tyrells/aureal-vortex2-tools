@@ -31,6 +31,9 @@ Run on the X79 host with the card bound to vfio-pci and no VM running, like srcp
                                          written with a value that marks it, the RAM at 0x29900 read
                                          after each to find where it lands, the interrupt source word
                                          watched; then both timers, their masks and the status bits
+  sudo ./sbprobe.py fmbit [--log FILE]  which control-word bit is the FM decode: 388h read with bit 1, bit 2,
+                                         bit 19 and bit 24 each added alone to the reset word, and each
+                                         taken away from AU30DOS's word
   sudo ./sbprobe.py clear
 
 Why: with Sound Blaster emulation on, AU30DOS.COM runs from AUTOEXEC.BAT before Windows and
@@ -288,9 +291,22 @@ def fmmap(bar, log):
     os.close(fd)
 
 
+def fmbit(bar, log):
+    fd, inb, outb = port_io()
+    old = bar.rd(CTRL)
+    out = {}
+    for name, word in [('reset word', 0x00103260)] + [(f'reset + bit {b}', 0x00103260 | (1 << b)) for b in (1, 2, 4, 19, 24)] + \
+                      [('AU30DOS word', 0x0118326e)] + [(f'AU30DOS - bit {b}', 0x0118326e & ~(1 << b)) for b in (1, 2, 19, 24)]:
+        bar.wr(CTRL, word); time.sleep(0.002)
+        out[name] = dict(ctrl=hex(word), at_388=hex(inb(0x388)), at_22a=hex(inb(0x22a)), at_22c=hex(inb(0x22c)))
+    log(event='fmbit', results=out)
+    sp.w(bar, log, CTRL, old, 'ctrl: restored')
+    os.close(fd)
+
+
 def main():
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
-    if cmd not in ('scan', 'setup', 'bits', 'ports', 'fm', 'sbon', 'fmmap', 'clear'):
+    if cmd not in ('scan', 'setup', 'bits', 'ports', 'fm', 'sbon', 'fmmap', 'fmbit', 'clear'):
         sys.exit(__doc__)
     if sp.vm_running():
         sys.exit('a QEMU process is running; stop the VM first (this needs the card idle)')
@@ -316,6 +332,8 @@ def main():
         sbon(bar, log)
     elif cmd == 'fmmap':
         fmmap(bar, log)
+    elif cmd == 'fmbit':
+        fmbit(bar, log)
     elif cmd == 'clear':
         sp.w(bar, log, X804, 0, '0x2a804: 0')
         sp.w(bar, log, CTRL, bar.rd(CTRL) & ~((1 << 24) | 0x4007), 'ctrl: legacy bits off')

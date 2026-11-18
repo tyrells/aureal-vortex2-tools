@@ -1,0 +1,10 @@
+{"event": "start", "cmd": "game", "argv": ["game", "--seconds", "10", "--log", "/home/z2k-retro/legacygame.jsonl"], "chip_ctrl": "0x103260", "utc": "2026-11-18T01:34:40.906788Z"}
+{"event": "game_before", "legacy": "0xf0", "ctrl2": "0x610c", "axes": ["0x0", "0x0", "0x0", "0x0"], "utc": "2026-11-18T01:34:40.906960Z"}
+{"event": "write", "what": "ctrl2: game port legacy (timed) mode", "addr": "0x2880c", "old": "0x610c", "wrote": "0x610c", "readback": "0x610c", "utc": "2026-11-18T01:34:40.907032Z"}
+{"event": "game_oneshots", "trial": 0, "first": "0xff", "last": "0xff", "buttons": "0x0", "axis_us": [null, null, null, null], "note": "None = never fell within 20 ms (nothing plugged in)", "utc": "2026-11-18T01:34:40.927090Z"}
+{"event": "game_oneshots", "trial": 1, "first": "0xff", "last": "0xff", "buttons": "0x0", "axis_us": [null, null, null, null], "note": "None = never fell within 20 ms (nothing plugged in)", "utc": "2026-11-18T01:34:40.947149Z"}
+{"event": "game_oneshots", "trial": 2, "first": "0xff", "last": "0xff", "buttons": "0x0", "axis_us": [null, null, null, null], "note": "None = never fell within 20 ms (nothing plugged in)", "utc": "2026-11-18T01:34:40.967205Z"}
+{"event": "write", "what": "ctrl2: game port ADC mode", "addr": "0x2880c", "old": "0x610c", "wrote": "0x614c", "readback": "0x614c", "utc": "2026-11-18T01:34:40.967268Z"}
+{"event": "game_sampling", "seconds": 10.0, "note": "move the stick and press the buttons now", "utc": "2026-11-18T01:34:40.997406Z"}
+{"event": "game_adc", "t": 0.0, "axes": [8191, 8191, 8191, 8191], "raw": ["0xffff", "0xffff", "0xffff", "0xffff"], "buttons": "0x0", "utc": "2026-11-18T01:34:40.997515Z"}
+{"event": "write", "what": "ctrl2: game port legacy mode", "addr": "0x2880c", "old": "0x614c", "wrote": "0x610c", "readback": "0x610c", "utc": "2026-11-18T01:34:51.006893Z"}

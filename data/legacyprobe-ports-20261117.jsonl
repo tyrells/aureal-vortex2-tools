@@ -1,0 +1,27 @@
+{"event": "start", "cmd": "ports", "argv": ["ports", "--log", "/home/z2k-retro/legacyports.jsonl"], "chip_ctrl": "0x103260", "utc": "2026-11-18T01:34:51.123101Z"}
+{"event": "ports_before", "ctrl": "0x103260", "at_330": ["0xff", "0xff"], "at_200": "0xff", "utc": "2026-11-18T01:34:51.123259Z"}
+{"event": "write", "what": "ctrl: MIDI enable, MIDI port field 0, game port field 1", "addr": "0x2a00c", "old": "0x103260", "wrote": "0x103209", "readback": "0x103209", "utc": "2026-11-18T01:34:51.123329Z"}
+{"event": "midi_port", "field": 0, "found": {}, "mmio_status": "0x81", "utc": "2026-11-18T01:34:51.123390Z"}
+{"event": "write", "what": "ctrl: MIDI enable, MIDI port field 1, game port field 1", "addr": "0x2a00c", "old": "0x103209", "wrote": "0x103229", "readback": "0x103229", "utc": "2026-11-18T01:34:51.123447Z"}
+{"event": "midi_port", "field": 1, "found": {}, "mmio_status": "0x81", "utc": "2026-11-18T01:34:51.123505Z"}
+{"event": "write", "what": "ctrl: MIDI enable, MIDI port field 2, game port field 1", "addr": "0x2a00c", "old": "0x103229", "wrote": "0x103249", "readback": "0x103249", "utc": "2026-11-18T01:34:51.123555Z"}
+{"event": "midi_port", "field": 2, "found": {}, "mmio_status": "0x81", "utc": "2026-11-18T01:34:51.123610Z"}
+{"event": "write", "what": "ctrl: MIDI enable, MIDI port field 3, game port field 1", "addr": "0x2a00c", "old": "0x103249", "wrote": "0x103269", "readback": "0x103269", "utc": "2026-11-18T01:34:51.123659Z"}
+{"event": "midi_port", "field": 3, "found": {}, "mmio_status": "0x81", "utc": "2026-11-18T01:34:51.123712Z"}
+{"event": "write", "what": "ctrl: game port field 0", "addr": "0x2a00c", "old": "0x103269", "wrote": "0x103069", "readback": "0x103069", "utc": "2026-11-18T01:34:51.123762Z"}
+{"event": "game_port", "field": 0, "non_ff": {}, "mmio_legacy": "0xff", "utc": "2026-11-18T01:34:51.123849Z"}
+{"event": "write", "what": "ctrl: game port field 1", "addr": "0x2a00c", "old": "0x103069", "wrote": "0x103269", "readback": "0x103269", "utc": "2026-11-18T01:34:51.123912Z"}
+{"event": "game_port", "field": 1, "non_ff": {}, "mmio_legacy": "0xff", "utc": "2026-11-18T01:34:51.124005Z"}
+{"event": "write", "what": "ctrl: game port field 2", "addr": "0x2a00c", "old": "0x103269", "wrote": "0x103469", "readback": "0x103469", "utc": "2026-11-18T01:34:51.124059Z"}
+{"event": "game_port", "field": 2, "non_ff": {}, "mmio_legacy": "0xff", "utc": "2026-11-18T01:34:51.124144Z"}
+{"event": "write", "what": "ctrl: game port field 3", "addr": "0x2a00c", "old": "0x103469", "wrote": "0x103669", "readback": "0x103669", "utc": "2026-11-18T01:34:51.124187Z"}
+{"event": "game_port", "field": 3, "non_ff": {}, "mmio_legacy": "0xff", "utc": "2026-11-18T01:34:51.124271Z"}
+{"event": "write", "what": "ctrl: game port field 4", "addr": "0x2a00c", "old": "0x103669", "wrote": "0x103869", "readback": "0x103869", "utc": "2026-11-18T01:34:51.124313Z"}
+{"event": "game_port", "field": 4, "non_ff": {}, "mmio_legacy": "0xff", "utc": "2026-11-18T01:34:51.124396Z"}
+{"event": "write", "what": "ctrl: game port field 5", "addr": "0x2a00c", "old": "0x103869", "wrote": "0x103a69", "readback": "0x103a69", "utc": "2026-11-18T01:34:51.124440Z"}
+{"event": "game_port", "field": 5, "non_ff": {}, "mmio_legacy": "0xff", "utc": "2026-11-18T01:34:51.124524Z"}
+{"event": "write", "what": "ctrl: game port field 6", "addr": "0x2a00c", "old": "0x103a69", "wrote": "0x103c69", "readback": "0x103c69", "utc": "2026-11-18T01:34:51.124567Z"}
+{"event": "game_port", "field": 6, "non_ff": {}, "mmio_legacy": "0xff", "utc": "2026-11-18T01:34:51.124650Z"}
+{"event": "write", "what": "ctrl: game port field 7", "addr": "0x2a00c", "old": "0x103c69", "wrote": "0x103e69", "readback": "0x103e69", "utc": "2026-11-18T01:34:51.124693Z"}
+{"event": "game_port", "field": 7, "non_ff": {}, "mmio_legacy": "0xff", "utc": "2026-11-18T01:34:51.124776Z"}
+{"event": "write", "what": "ctrl: restored", "addr": "0x2a00c", "old": "0x103e69", "wrote": "0x103260", "readback": "0x103260", "utc": "2026-11-18T01:34:51.124819Z"}

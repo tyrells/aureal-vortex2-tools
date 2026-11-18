@@ -34,6 +34,9 @@ Run on the X79 host with the card bound to vfio-pci and no VM running, like srcp
   sudo ./sbprobe.py fmbit [--log FILE]  which control-word bit is the FM decode: 388h read with bit 1, bit 2,
                                          bit 19 and bit 24 each added alone to the reset word, and each
                                          taken away from AU30DOS's word
+  sudo ./sbprobe.py reset [--log FILE]  what writing all ones to the control word does (AU30DOS's first write,
+                                         the driver's last): the word read back at once and after 1, 5
+                                         and 20 ms, and a handful of other registers before and after
   sudo ./sbprobe.py clear
 
 Why: with Sound Blaster emulation on, AU30DOS.COM runs from AUTOEXEC.BAT before Windows and
@@ -304,9 +307,30 @@ def fmbit(bar, log):
     os.close(fd)
 
 
+def reset(bar, log):
+    watch = [CTRL, IRQ_CTRL, X804, 0x28400, 0x282b4, 0x29854, 0x29900, 0x2880c, 0x2b3d4, 0x26e40, 0x21000]
+    bar.wr(X804, 0x212eb)
+    bar.wr(0x29900, 0x12345678)
+    bar.wr(CTRL, 0x0118326e)
+    before = {a: bar.rd(a) for a in watch}
+    bar.wr(CTRL, 0xffffffff)
+    seen = [(0, bar.rd(CTRL))]
+    for ms in (1, 5, 20):
+        time.sleep(ms / 1000)
+        seen.append((ms, bar.rd(CTRL)))
+    after = {a: bar.rd(a) for a in watch}
+    log(event='reset', ctrl_after=[(t, hex(v)) for t, v in seen],
+        changed={hex(a): [hex(before[a]), hex(after[a])] for a in watch if before[a] != after[a]},
+        unchanged={hex(a): hex(before[a]) for a in watch if before[a] == after[a]})
+    bar.wr(0x29900, 0)
+    bar.wr(X804, 0)
+    if bar.rd(CTRL) & (1 << 21):
+        sp.release(bar, log)
+
+
 def main():
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
-    if cmd not in ('scan', 'setup', 'bits', 'ports', 'fm', 'sbon', 'fmmap', 'fmbit', 'clear'):
+    if cmd not in ('scan', 'setup', 'bits', 'ports', 'fm', 'sbon', 'fmmap', 'fmbit', 'reset', 'clear'):
         sys.exit(__doc__)
     if sp.vm_running():
         sys.exit('a QEMU process is running; stop the VM first (this needs the card idle)')
@@ -334,6 +358,8 @@ def main():
         fmmap(bar, log)
     elif cmd == 'fmbit':
         fmbit(bar, log)
+    elif cmd == 'reset':
+        reset(bar, log)
     elif cmd == 'clear':
         sp.w(bar, log, X804, 0, '0x2a804: 0')
         sp.w(bar, log, CTRL, bar.rd(CTRL) & ~((1 << 24) | 0x4007), 'ctrl: legacy bits off')

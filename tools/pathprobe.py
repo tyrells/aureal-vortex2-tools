@@ -3,10 +3,9 @@
 
 Run on the X79 host with the card bound to vfio-pci and no VM running, like srcprobe.py.
 
-  sudo ./pathprobe.py eq [--log FILE]        the hardware EQ alone (VDB sink 0xa0 -> source 0x7e):
-                                             the driver's settings as traced, then with its band
-                                             gains moved or cleared, to find which word is the
-                                             band gain and what the bands add to the bypass
+  sudo ./pathprobe.py eq [--log FILE]        the hardware EQ alone (VDB sink 0xa0 -> source 0x7e),
+                                             the driver's coefficients with the bypass and band
+                                             gains set in turn (current and target alike)
   sudo ./pathprobe.py paths [--out FILE.npz] [--log FILE]
                                              the two paths that the 3D level was measured between,
                                              each read at mixer 0's output (what goes to the
@@ -22,8 +21,8 @@ where it is. Since then a3dprobe found the slices' outputs halved (leaving 1.5 t
 xtprobe found the canceller exactly as modelled. In the driver's routing at the time, the native
 click does not go straight to the output: it goes through mixer 4, then mixer 6 at input gain
 0x00 (0.5), then the hardware EQ, then mixer 0. The EQ is the one block not yet read digitally,
-and its ten band gains sit at +0x28, which the model does not use (it reads +0x2c, which is 0),
-so the model plays the EQ as its bypass gain alone.
+and the model plays it as its bypass gain alone (the driver's steady state: band targets 0, bypass
+0x7fff; analog runs 9 and 16).
 
 The settings are the driver's own registers from test-suite run 4 at 125 s, a 3D click at gain
 1.0 in headphone mode (data/path-snapshot-run4.json): the mixer block, the canceller, the EQ and
@@ -95,35 +94,32 @@ def mixer_setup(bar, log, enable):
         out=[hex(bar.rd(MIX_OUT_C + 4 * mx)) for mx in range(8)])
 
 
-def eq_setup(bar, log, variant='traced'):
+EQ_SIDES = (0x2b000, 0x2b1e0)
+EQ_BYP_T, EQ_BYP_C = (0x2b3d4, 0x2b3ec), (0x2b3d0, 0x2b3e8)   # bypass target, current (ALSA au88x0_eq.c)
+
+
+def eq_setup(bar, log, variant='steady'):
+    """The driver's coefficients and time constants, with gains set as the variant says, current
+    and target alike (run 1 of this probe copied the trace, where the band gains' current words
+    held 0x3e96 gliding to targets of 0 and the bypass current was cleared, so it read a moment
+    of a glide: the band sum, plus a bypass rising from 0)."""
     e = words('eq')
-    if variant == 'gain at +0x2c':
-        e = {a: v for a, v in e.items()}
-        for side in (0x2b000, 0x2b1e0):
-            for b in range(10):
-                e[side + b * 0x30 + 0x2c] = e.get(side + b * 0x30 + 0x28, 0)
-                e[side + b * 0x30 + 0x28] = 0
-    elif variant == 'bands off':
-        e = {a: v for a, v in e.items()}
-        for side in (0x2b000, 0x2b1e0):
-            for b in range(10):
-                e[side + b * 0x30 + 0x28] = e[side + b * 0x30 + 0x2c] = 0
-    elif variant == 'bypass off':
-        e = dict(e)
-        e[0x2b3d4] = e[0x2b3ec] = 0
-    elif variant.startswith('one band'):
-        b0 = int(variant.split()[-1])
-        e = dict(e)
-        e[0x2b3d4] = e[0x2b3ec] = 0
-        for side in (0x2b000, 0x2b1e0):
-            for b in range(10):
-                if b != b0:
-                    e[side + b * 0x30 + 0x28] = e[side + b * 0x30 + 0x2c] = 0
     for a in range(0x2b000, 0x2b450, 4):
         bar.wr(a, 0)
     load(bar, e)
-    log(event='eq', variant=variant, bypass=[hex(bar.rd(0x2b3d4)), hex(bar.rd(0x2b3ec))],
-        band0=[hex(bar.rd(0x2b000 + 4 * j)) for j in range(12)], ctl=hex(bar.rd(0x2b440)))
+    byp, bands = {'steady': (0x7fff, {}), 'bypass 0x3fff': (0x3fff, {}), 'bypass 0x8001': (0x8001, {}),
+                  'all bands': (0, {b: 0x3e96 for b in range(10)}), 'one band 5': (0, {5: 0x3e96}),
+                  'one band 0': (0, {0: 0x3e96}), 'one band 9': (0, {9: 0x3e96}),
+                  'band 5 and bypass': (0x7fff, {5: 0x3e96}), 'bands off': (0, {})}[variant]
+    for side in EQ_SIDES:
+        for b in range(10):
+            g = bands.get(b, 0)
+            bar.wr(side + b * 0x30 + 0x28, g)
+            bar.wr(side + b * 0x30 + 0x2c, g)
+    for a in EQ_BYP_T + EQ_BYP_C:
+        bar.wr(a, byp)
+    log(event='eq', variant=variant, bypass=[hex(bar.rd(a)) for a in EQ_BYP_T + EQ_BYP_C],
+        band5=[hex(bar.rd(0x2b000 + 5 * 0x30 + o)) for o in (0x28, 0x2c)], ctl=hex(bar.rd(0x2b440)))
 
 
 def xt_setup(bar, log):
@@ -160,6 +156,13 @@ def a3d_setup(bar, log):
         bar.wr(b + cur, swap(bar.rd(b + tgt)))
     for off in range(0x1e8, 0x2c8, 4):            # filter state
         bar.wr(b + off, 0)
+    # Tracking off, so the currents written here are what plays. Run 1 kept the driver's rates
+    # and read the targets' high halves back as 0 once the slice ran, which left the distance
+    # filter with a1 alone (1.75, unstable).
+    for i in range(4):
+        bar.wr(A_A(src) + 0x37c + 4 * i, 0)
+    log(event='a3d_before_enable', gain=[hex(bar.rd(b + 0xe0)), hex(bar.rd(b + 0xe4))], a12=[hex(bar.rd(b + 0xe8)), hex(bar.rd(b + 0xec))],
+        b01=[hex(bar.rd(b + 0xf0)), hex(bar.rd(b + 0xf4))], taps=[hex(bar.rd(b + 4 * k)) for k in range(3)])
     sp.w(bar, log, SLICE3 + 0x40, 0, 'slice pointers 0')
     sp.w(bar, log, SLICE3 + 0x38, 0xb8000088, 'slice control: rate 17 (driver value)')
     sp.w(bar, log, SLICE3 + 0x38, 0xf0000001, 'slice control: enable (driver value)')
@@ -219,7 +222,8 @@ def main():
     quiet = sp.Log(os.devnull)
     if cmd == 'eq':
         pairs = [(F, EQ_IN), (EQ_OUT, S)]
-        for variant in ('traced', 'gain at +0x2c', 'bands off', 'bypass off', 'one band 5', 'one band 0', 'one band 9'):
+        for variant in ('steady', 'bypass 0x3fff', 'bypass 0x8001', 'all bands', 'one band 5', 'one band 0',
+                        'one band 9', 'band 5 and bypass', 'bands off'):
             for name, pat in (('const 0x2000', const(0x2000)), ('impulse 0x4000', impulse())):
                 r = capture(bar, quiet, pairs, pat, lambda: eq_setup(bar, log, variant))
                 log(event='eqcase', variant=variant, case=name, level=round(plateau(r), 1),
@@ -234,7 +238,7 @@ def main():
             names.append(name)
         for pname, pat in (('const 0x2000', const(0x2000)), ('impulse 0x4000', impulse())):
             run(f'native, {pname}', NATIVE, pat, lambda: (mixer_setup(bar, log, NATIVE_EN), eq_setup(bar, log)))
-            run(f'native, EQ bands off, {pname}', NATIVE, pat, lambda: (mixer_setup(bar, log, NATIVE_EN), eq_setup(bar, log, 'bands off')))
+            run(f'native, EQ all bands (no bypass), {pname}', NATIVE, pat, lambda: (mixer_setup(bar, log, NATIVE_EN), eq_setup(bar, log, 'all bands')))
             run(f'3D, {pname}', THREED, pat, lambda: (mixer_setup(bar, log, THREED_EN), xt_setup(bar, log), a3d_setup(bar, log)))
             a3d_off(bar, log)
             # the 3D path's pieces: slice output alone, and canceller output alone

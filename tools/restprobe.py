@@ -153,13 +153,27 @@ def main():
         names.append(name)
 
     if cmd == 'xtdelay':
-        for dl, dr in ((0, 0), (1, 0), (2, 0), (5, 0), (13, 0), (31, 0), (0, 7), (0, 13), (13, 13)):
-            K = dict(k={'eql': 0x4000, 'eqr': 0x4000, 'xtl': 0x2000, 'xtr': 0x2000}, gin={0: 0x7fff, 5: 0x7fff}, dl=dl, dr=dr)
-            for side, out in (('right', 0x67), ('left', 0x66)):
-                xp.zero_inputs(bar, quiet)
-                pairs = [(F, 0x96), (FIFO2, 0x9b), (out, S)]
-                r = run(bar, quiet, pairs, impulse(), lambda: xp.xt_setup(bar, quiet, **K), pat2=impulse())
-                keep(f'delays L {dl} R {dr}, {side} output', r, dl=dl, dr=dr, side=side)
+        # Run 1 wrote the control word as the driver does in headphone mode (0xc0840088, then
+        # 0xd0840089, with the delays OR'd in) and the cross copy came out with no delay at any
+        # setting. In satellite mode the driver writes 0xa001ad00, 0xd001ad88, 0xc001ad89: no
+        # bits 23 and 18. Both forms here.
+        def ctl_sat(d):
+            def f():
+                sp.w(bar, log, xp.CTRL, 0xa0000000 | d, 'xt control: off, delays (satellite form)')
+                sp.w(bar, log, xp.CTRL, 0xd0000088 | d, 'xt control: rate 17 (satellite form)')
+                sp.w(bar, log, xp.CTRL, 0xc0000089 | d, 'xt control: enable (satellite form)')
+            return f
+        for form in ('satellite', 'headphone'):
+            for dl, dr in ((0, 0), (1, 0), (5, 0), (13, 0), (31, 0), (0, 7), (0, 13)):
+                K = dict(k={'eql': 0x4000, 'eqr': 0x4000, 'xtl': 0x2000, 'xtr': 0x2000}, gin={0: 0x7fff, 5: 0x7fff}, dl=dl, dr=dr)
+                d = ((dl & 0x1f) << 13) | ((dr & 0x1f) << 8)
+                setup = (lambda K=K, d=d: (xp.xt_setup(bar, quiet, **K), ctl_sat(d)())) if form == 'satellite' else (lambda K=K: xp.xt_setup(bar, quiet, **K))
+                for side, out in (('right', 0x67), ('left', 0x66)):
+                    xp.zero_inputs(bar, quiet)
+                    pairs = [(F, 0x96), (FIFO2, 0x9b), (out, S)]
+                    r = run(bar, quiet, pairs, impulse(), setup, pat2=impulse())
+                    keep(f'{form} form, delays L {dl} R {dr}, {side} output', r, dl=dl, dr=dr, side=side, form=form,
+                         ctl=hex(bar.rd(xp.CTRL)))
         # the two FIFOs alone into the same output, to check they start together
         xp.zero_inputs(bar, quiet)
         r = run(bar, quiet, [(F, 0x96), (FIFO2, 0x97), (0x66, S)], impulse(0x4000, 8),

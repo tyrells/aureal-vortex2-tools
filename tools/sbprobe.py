@@ -37,6 +37,10 @@ Run on the X79 host with the card bound to vfio-pci and no VM running, like srcp
   sudo ./sbprobe.py reset [--log FILE]  what writing all ones to the control word does (AU30DOS's first write,
                                          the driver's last): the word read back at once and after 1, 5
                                          and 20 ms, and a handful of other registers before and after
+  sudo ./sbprobe.py fmflag [--log FILE] whether the flag bits of the key-on bytes (bit 7 after writing 0xb0-0xb8,
+                                         bits 7-6 of channels 6-8 after 0xbd) clear when the word is read,
+                                         stay until written, or clear on their own: each written, then the
+                                         word read four times, then again after 1 and 20 ms without reading
   sudo ./sbprobe.py clear
 
 Why: with Sound Blaster emulation on, AU30DOS.COM runs from AUTOEXEC.BAT before Windows and
@@ -328,9 +332,35 @@ def reset(bar, log):
         sp.release(bar, log)
 
 
+def fmflag(bar, log):
+    fd, inb, outb = port_io()
+    old = bar.rd(CTRL)
+    bar.wr(CTRL, 0x0118326e)
+    time.sleep(0.005)
+    def opl(ia, reg, val):
+        outb(ia, reg); time.sleep(0.00004); outb(ia + 1, val); time.sleep(0.00005)
+    cases = [('b0 key on', 0x388, 0xb0, 0x25, 0x29950), ('b0 key off', 0x388, 0xb0, 0x05, 0x29950),
+             ('b3 key on', 0x388, 0xb3, 0x31, 0x29954), ('bd rhythm', 0x388, 0xbd, 0x3f, 0x29958),
+             ('bank 1 b0 key on', 0x38a, 0xb0, 0x26, 0x299c8)]
+    for name, ia, reg, val, word in cases:
+        opl(ia, reg, val)
+        reads = [hex(bar.rd(word)) for _ in range(4)]
+        opl(ia, reg, val)
+        time.sleep(0.001); late1 = hex(bar.rd(word))
+        opl(ia, reg, val)
+        time.sleep(0.02); late20 = hex(bar.rd(word))
+        log(event='fmflag', case=name, word=hex(word), reads_back_to_back=reads,
+            first_read_after_1ms=late1, first_read_after_20ms=late20)
+    for r in range(0xb0, 0xb9):
+        opl(0x388, r, 0); opl(0x38a, r, 0)
+    opl(0x388, 0xbd, 0)
+    sp.w(bar, log, CTRL, old, 'ctrl: restored')
+    os.close(fd)
+
+
 def main():
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
-    if cmd not in ('scan', 'setup', 'bits', 'ports', 'fm', 'sbon', 'fmmap', 'fmbit', 'reset', 'clear'):
+    if cmd not in ('scan', 'setup', 'bits', 'ports', 'fm', 'sbon', 'fmmap', 'fmbit', 'reset', 'fmflag', 'clear'):
         sys.exit(__doc__)
     if sp.vm_running():
         sys.exit('a QEMU process is running; stop the VM first (this needs the card idle)')
@@ -360,6 +390,8 @@ def main():
         fmbit(bar, log)
     elif cmd == 'reset':
         reset(bar, log)
+    elif cmd == 'fmflag':
+        fmflag(bar, log)
     elif cmd == 'clear':
         sp.w(bar, log, X804, 0, '0x2a804: 0')
         sp.w(bar, log, CTRL, bar.rd(CTRL) & ~((1 << 24) | 0x4007), 'ctrl: legacy bits off')

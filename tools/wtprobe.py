@@ -35,6 +35,10 @@ Run on the X79 host with the card bound to vfio-pci and no VM running, like srcp
                                              impulses through four cut-offs at 48, 44.1 and 22.05 kHz
                                              rates, on second-half voice 8 and first-half voice 0
                                              (about 10 s)
+  sudo ./wtprobe.py sendfilt [--out FILE.npz] the low-pass on each path (direct-stream, main pair, both
+                                             sends): a full-scale square wave through cut-offs 0xa1,
+                                             0xb1 and open, at 48, 44.1 and 12 kHz rates, on first-half
+                                             voice 0 and second-half voice 8 (about 20 s)
   sudo ./wtprobe.py clear
 
 The chain: a second-half voice (global 40, local 8) with DSREG clear, so it plays onto its half's
@@ -319,7 +323,7 @@ def ramp_summary(out, t_fire):
 
 def main():
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
-    if cmd not in ('start', 'bus', 'sweep', 'levels', 'gains', 'state', 'mix', 'own', 'reso', 'ramp', 'filtrate', 'clear'):
+    if cmd not in ('start', 'bus', 'sweep', 'levels', 'gains', 'state', 'mix', 'own', 'reso', 'ramp', 'filtrate', 'sendfilt', 'clear'):
         sys.exit(__doc__)
     if sp.vm_running():
         sys.exit('a QEMU process is running; stop the VM first (this needs the card idle)')
@@ -508,6 +512,34 @@ def main():
                 bar.wr(BANK + 0x200 + lv * 0x10 + 12, 0)
         set_voice(40)
         path = sp.arg('--out', 'wtprobe-filtrate.npz', str)
+        np.savez(path, rows=np.array(rows))
+        log(event='saved', path=path, cases=len(rows))
+    elif cmd == 'sendfilt':
+        # Does the low-pass act the same on the sends (36/37) as on the direct-stream and main
+        # pairs? The 3.0 replay had the card's reflections (first-half voices 0-3, cut-off 0xa1,
+        # through the sends) brighter above 400 Hz than the model by up to 11 dB, while
+        # filtrate found the cut-off itself as modelled; its send captures were too small to
+        # read (peaks of 1-5). Here a square wave at full scale (32 words up, 32 down), so the
+        # sends get edges thousands of steps high, read on each path at three rates.
+        import numpy as np
+        sq = [0x7fff] * 32 + [0] * 32
+        rows = []
+        paths = [('ds_left', True, 0, 0, 0, 0), ('left', False, 0x3f, 0, 0, 1),
+                 ('reverb', False, 0x3f, 0x7f, 0x7f, 2), ('chorus', False, 0x3f, 0x7f, 0x7f, 3)]
+        for v in (0, 40):
+            set_voice(v)
+            mute_others(bar, log)
+            for rate in (0xa000, 0x9acc, 0x5000):
+                for filt in (0xa1, 0xb1, 0xcf):
+                    for bus, ds, pan, cho, rev, code in paths:
+                        lv, r = capture_bus(bar, quiet, bus, pan, cho, rev, ds=ds, filt=filt, pattern=sq, rate=rate)
+                        rows.append((v, rate, filt, code, *((r + [0] * 160)[:160])))
+                        log(event='sendfilt', voice=v, rate=hex(rate), filt=hex(filt), bus=bus,
+                            peak=max(rows[-1][4:], key=abs), head=[x for x in rows[-1][4:]][:24])
+            for lv in range(32):
+                bar.wr(BANK + 0x200 + lv * 0x10 + 12, 0)
+        set_voice(40)
+        path = sp.arg('--out', 'wtprobe-sendfilt.npz', str)
         np.savez(path, rows=np.array(rows))
         log(event='saved', path=path, cases=len(rows))
     elif cmd == 'ramp':

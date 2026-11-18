@@ -1,0 +1,3 @@
+{"event": "start", "cmd": "clear", "argv": ["clear", "--log", "/home/z2k-retro/sb5.jsonl"], "chip_ctrl": "0x103260", "utc": "2026-11-18T05:23:20.551587Z"}
+{"event": "write", "what": "0x2a804: 0", "addr": "0x2a804", "old": "0x0", "wrote": "0x0", "readback": "0x0", "utc": "2026-11-18T05:23:20.551691Z"}
+{"event": "write", "what": "ctrl: legacy bits off", "addr": "0x2a00c", "old": "0x103260", "wrote": "0x103260", "readback": "0x103260", "utc": "2026-11-18T05:23:20.551749Z"}

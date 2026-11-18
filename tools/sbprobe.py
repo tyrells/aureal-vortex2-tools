@@ -19,6 +19,14 @@ Run on the X79 host with the card bound to vfio-pci and no VM running, like srcp
                                          0x226. Only useful if the chipset forwards those legacy
                                          addresses to the card's slot; all 0xff means it does not
                                          (as with the MPU-401 and game port on this machine)
+  sudo ./sbprobe.py fm    [--log FILE]   the FM ports at 388h-38bh, which this machine does forward (run 1:
+                                         388h read 0x00 with the decode on, 0xff off): OPL register
+                                         writes, and after each the latch block (0x29840-0x29854) and
+                                         the 256-byte RAM at 0x29900; then the AdLib detection test
+                                         (timer 1 started, status read: an OPL answers 0xc0)
+  sudo ./sbprobe.py sbon  [--log FILE]   which control-word bit makes 220h-22fh answer: each candidate
+                                         bit added on its own (and the driver's 0x2a804 word), the
+                                         ports read, then a DSP reset at 226h and 22ah read (0xaa)
   sudo ./sbprobe.py clear
 
 Why: with Sound Blaster emulation on, AU30DOS.COM runs from AUTOEXEC.BAT before Windows and
@@ -145,9 +153,81 @@ def ports(bar, log):
     os.close(fd)
 
 
+BLOCK_REGS = (0x29800, 0x29804, 0x29820, 0x29828, 0x2982c, 0x29830, 0x29840, 0x29844, 0x29848,
+              0x2984c, 0x29850, 0x29854, 0x29858, 0x2985c)
+
+
+def port_io():
+    fd = os.open('/dev/port', os.O_RDWR)
+    return fd, (lambda a: os.pread(fd, 1, a)[0]), (lambda a, v: os.pwrite(fd, bytes([v]), a))
+
+
+def fm(bar, log):
+    fd, inb, outb = port_io()
+    old = bar.rd(CTRL)
+    bar.wr(CTRL, 0x0118326e)
+    time.sleep(0.01)
+    regs = lambda: {a: bar.rd(a) for a in BLOCK_REGS}
+    ram = lambda: [bar.rd(0x29900 + 4 * i) for i in range(64)]
+    r0, m0 = regs(), ram()
+    log(event='fm_before', status=hex(inb(0x388)), regs={hex(a): hex(v) for a, v in r0.items()})
+    writes = [(0x388, 0x389, 0x01, 0x20), (0x388, 0x389, 0x20, 0x21), (0x388, 0x389, 0x40, 0x3f),
+              (0x388, 0x389, 0xa0, 0x41), (0x388, 0x389, 0xbd, 0x00), (0x38a, 0x38b, 0x05, 0x01),
+              (0x38a, 0x38b, 0x20, 0x22), (0x38a, 0x38b, 0xa0, 0x42)]
+    for ia, da, reg, val in writes:
+        outb(ia, reg); time.sleep(0.0001)
+        r1, m1 = regs(), ram()
+        outb(da, val); time.sleep(0.0001)
+        r2, m2 = regs(), ram()
+        log(event='fm_write', port=hex(ia), reg=hex(reg), val=hex(val), status=hex(inb(ia)),
+            after_index={hex(a): hex(v) for a, v in r1.items() if v != r0[a]},
+            after_data={hex(a): hex(v) for a, v in r2.items() if v != r1[a]},
+            ram_changed={hex(0x29900 + 4 * i): [hex(m0[i]), hex(m2[i])] for i in range(64) if m2[i] != m0[i]})
+        r0, m0 = r2, m2
+    # AdLib detection: reset both timers and the IRQ flag, read status, start timer 1, wait, read
+    def opl(reg, val):
+        outb(0x388, reg); time.sleep(0.00004); outb(0x389, val); time.sleep(0.0001)
+    opl(0x04, 0x60); opl(0x04, 0x80)
+    s1 = inb(0x388)
+    opl(0x02, 0xff); opl(0x04, 0x21)
+    time.sleep(0.001)
+    s2 = inb(0x388)
+    opl(0x04, 0x60); opl(0x04, 0x80)
+    log(event='adlib_detect', status_reset=hex(s1), status_after_timer=hex(s2),
+        note='an OPL2/OPL3 reads 0x00 then 0xc0', regs={hex(a): hex(v) for a, v in regs().items()})
+    sp.w(bar, log, CTRL, old, 'ctrl: restored')
+    os.close(fd)
+
+
+def sbon(bar, log):
+    fd, inb, outb = port_io()
+    old = bar.rd(CTRL)
+    base = 0x0118326e
+    trials = [('AU30DOS word', base, None), ('+ bit 0', base | 1, None), ('+ bit 4', base | 0x10, None),
+              ('+ bit 14', base | 0x4000, None), ('+ bits 4 and 14', base | 0x4010, None),
+              ('+ 0x2a804 = 0x212eb', base, 0x212eb), ('+ bit 4, 0x2a804', base | 0x10, 0x212eb),
+              ('+ bits 4 and 14, 0x2a804', base | 0x4010, 0x212eb), ('bit 19 clear', base & ~(1 << 19), None),
+              ('bit 24 clear', base & ~(1 << 24), None)]
+    for name, word, x804 in trials:
+        bar.wr(CTRL, word)
+        bar.wr(X804, x804 if x804 is not None else 0)
+        time.sleep(0.005)
+        rd = {hex(a): hex(inb(a)) for a in range(0x220, 0x230) if inb(a) != 0xff}
+        before = {a: bar.rd(a) for a in BLOCK_REGS}
+        outb(0x226, 1); time.sleep(0.0001); outb(0x226, 0); time.sleep(0.001)
+        after = {a: bar.rd(a) for a in BLOCK_REGS}
+        log(event='sbon', trial=name, ctrl=hex(word), x804=hex(x804 or 0), non_ff=rd,
+            reset_read={'0x22a': hex(inb(0x22a)), '0x22e': hex(inb(0x22e))},
+            block_changed={hex(a): [hex(before[a]), hex(after[a])] for a in BLOCK_REGS if before[a] != after[a]},
+            irq_source=hex(bar.rd(0x2a000)))
+    bar.wr(X804, 0)
+    sp.w(bar, log, CTRL, old, 'ctrl: restored')
+    os.close(fd)
+
+
 def main():
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
-    if cmd not in ('scan', 'setup', 'bits', 'ports', 'clear'):
+    if cmd not in ('scan', 'setup', 'bits', 'ports', 'fm', 'sbon', 'clear'):
         sys.exit(__doc__)
     if sp.vm_running():
         sys.exit('a QEMU process is running; stop the VM first (this needs the card idle)')
@@ -167,6 +247,10 @@ def main():
         bits(bar, log)
     elif cmd == 'ports':
         ports(bar, log)
+    elif cmd == 'fm':
+        fm(bar, log)
+    elif cmd == 'sbon':
+        sbon(bar, log)
     elif cmd == 'clear':
         sp.w(bar, log, X804, 0, '0x2a804: 0')
         sp.w(bar, log, CTRL, bar.rd(CTRL) & ~((1 << 24) | 0x4007), 'ctrl: legacy bits off')

@@ -340,12 +340,25 @@ def fmflag(bar, log):
     old = bar.rd(CTRL)
     bar.wr(CTRL, 0x0118326e)
     time.sleep(0.005)
+    # Run 2: after a power cycle 388h read 0xff with the control word set; the earlier runs
+    # came after `setup`. AU30DOS's other writes are applied one at a time until 388h answers.
+    gate = []
+    for a, v in ((None, None), (0x29854, 0xc00), (0x29808, 0x5), (0x2980c, 0x0), (0x29854, 0xc00),
+                 (0x22040, 0x24), (X804, 0x212eb)):
+        if a is not None:
+            bar.wr(a, v)
+            bar.wr(CTRL, 0x0118326e)
+        time.sleep(0.002)
+        gate.append((hex(a) if a else 'control word only', hex(v) if v is not None else '', hex(inb(0x388))))
+        if inb(0x388) != 0xff:
+            break
+    log(event='fmflag_gate', steps=gate, regs={hex(r): hex(bar.rd(r)) for r in (0x22040, 0x29808, 0x29854, X804)})
     def opl(ia, reg, val):
         outb(ia, reg); time.sleep(0.00004); outb(ia + 1, val); time.sleep(0.00005)
     cases = [('b0 key on', 0x388, 0xb0, 0x25, 0x29950), ('b0 key off', 0x388, 0xb0, 0x05, 0x29950),
              ('b3 key on', 0x388, 0xb3, 0x31, 0x29954), ('bd rhythm', 0x388, 0xbd, 0x3f, 0x29958),
              ('bank 1 b0 key on', 0x38a, 0xb0, 0x26, 0x299c8), ('a0 (no flag)', 0x388, 0xa0, 0x41, 0x29948)]
-    for latch in (None, 0x400, 0x800, 0xc00):
+    for latch in (None, 0x0, 0x400, 0x800, 0xc00):
         if latch is not None:
             bar.wr(0x29854, latch)
         for i in range(64):

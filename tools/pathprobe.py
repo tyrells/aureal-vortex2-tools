@@ -155,10 +155,14 @@ def a3d_setup(bar, log):
     b = A_B(src)
     # start from the targets (the driver's currents may be mid-glide), halves as the chip keeps them
     swap = lambda v: ((v & 0xffff) << 16) | (v >> 16)
+    # From the snapshot, not from readback: the A3D words read back their low half only (run 3
+    # of this probe: every target read back as its low 16 bits, so currents copied from the
+    # readback lost a2, b0 and the right ear's taps, and the filter ran away at a1 = 1.75).
+    tv = lambda off: w.get(SNAP_B + off, 0)
     for k in range(56):
-        bar.wr(b + 4 * k, swap(bar.rd(b + 0x100 + 4 * k)))
+        bar.wr(b + 4 * k, swap(tv(0x100 + 4 * k)))
     for cur, tgt in ((0xe0, 0xe4), (0xe8, 0xec), (0xf0, 0xf4), (0xf8, 0xfc), (0x1e0, 0x1e4)):
-        bar.wr(b + cur, swap(bar.rd(b + tgt)))
+        bar.wr(b + cur, swap(tv(tgt)))
     for off in range(0x1e8, 0x2c8, 4):            # filter state
         bar.wr(b + off, 0)
     # Tracking off, so the currents written here are what plays. Run 1 kept the driver's rates

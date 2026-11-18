@@ -27,6 +27,10 @@ Run on the X79 host with the card bound to vfio-pci and no VM running, like srcp
   sudo ./sbprobe.py sbon  [--log FILE]   which control-word bit makes 220h-22fh answer: each candidate
                                          bit added on its own (and the driver's 0x2a804 word), the
                                          ports read, then a DSP reset at 226h and 22ah read (0xaa)
+  sudo ./sbprobe.py fmmap [--log FILE]  the whole FM register file: every OPL register index in both banks
+                                         written with a value that marks it, the RAM at 0x29900 read
+                                         after each to find where it lands, the interrupt source word
+                                         watched; then both timers, their masks and the status bits
   sudo ./sbprobe.py clear
 
 Why: with Sound Blaster emulation on, AU30DOS.COM runs from AUTOEXEC.BAT before Windows and
@@ -225,9 +229,68 @@ def sbon(bar, log):
     os.close(fd)
 
 
+def fmmap(bar, log):
+    fd, inb, outb = port_io()
+    old, oldmask = bar.rd(CTRL), bar.rd(IRQ_CTRL)
+    bar.wr(CTRL, 0x0118326e)
+    time.sleep(0.01)
+    ram = lambda: bytes(b for i in range(64) for b in bar.rd(0x29900 + 4 * i).to_bytes(4, 'little'))
+    # start from a cleared file, as AU30DOS does
+    for i in range(64):
+        bar.wr(0x29900 + 4 * i, 0)
+    bar.wr(0x2a000, bar.rd(0x2a000))                # clear what is pending (the driver writes the bits back)
+    src0 = bar.rd(0x2a000)
+    rows = []
+    for bank, (ia, da) in enumerate(((0x388, 0x389), (0x38a, 0x38b))):
+        for reg in range(0x100):
+            if reg in (0x02, 0x03, 0x04) and bank == 0:
+                continue                              # timers: below
+            m0 = ram()
+            outb(ia, reg); time.sleep(0.00004)
+            val = 0x5a if reg != 0x05 else 0x01       # keep OPL3 mode on in bank 1
+            outb(da, val); time.sleep(0.00005)
+            m1 = ram()
+            hit = [i for i in range(256) if m0[i] != m1[i]]
+            src = bar.rd(0x2a000)
+            rows.append((bank, reg, hit, [m1[i] for i in hit], src))
+            if src != src0:
+                bar.wr(0x2a000, src & ~src0)
+            # put the byte back to 0 so the next register's hit is clean
+            for i in hit:
+                a = 0x29900 + (i & ~3); w_ = bar.rd(a) & ~(0xff << (8 * (i & 3))); bar.wr(a, w_)
+        log(event='fmmap_bank', bank=bank, hits={hex(r): [[hex(x) for x in h], [hex(x) for x in v], hex(sv)]
+                                                  for b, r, h, v, sv in rows if b == bank and (h or sv != src0)})
+    # timers: status at rest, timer 1 (80 us) and timer 2 (320 us) each alone, masked, and the reset bit
+    def opl(reg, val):
+        outb(0x388, reg); time.sleep(0.00004); outb(0x389, val); time.sleep(0.00005)
+    res = {}
+    for name, seq, wait in (('rest', [(4, 0x60), (4, 0x80)], 0.001),
+                            ('timer1 0xff', [(4, 0x60), (4, 0x80), (2, 0xff), (4, 0x01)], 0.001),
+                            ('timer2 0xff', [(4, 0x60), (4, 0x80), (3, 0xff), (4, 0x02)], 0.002),
+                            ('timer1 masked', [(4, 0x60), (4, 0x80), (2, 0xff), (4, 0x41)], 0.001),
+                            ('timer1 0x00 (20 ms)', [(4, 0x60), (4, 0x80), (2, 0x00), (4, 0x01)], 0.005),
+                            ('timer1 0x00 after 25 ms', [], 0.025)):
+        for r, v in seq:
+            opl(r, v)
+        t0 = time.perf_counter(); seen = []
+        while time.perf_counter() - t0 < wait:
+            st = inb(0x388)
+            if not seen or seen[-1][1] != st:
+                seen.append((round((time.perf_counter() - t0) * 1e6), st))
+        res[name] = dict(status=[(t, hex(v)) for t, v in seen][:8], irq_source=hex(bar.rd(0x2a000)),
+                         latch=hex(bar.rd(0x29854)), view=hex(bar.rd(0x2985c)))
+    opl(4, 0x60); opl(4, 0x80)
+    log(event='fm_timers', **res)
+    for i in range(64):
+        bar.wr(0x29900 + 4 * i, 0)
+    bar.wr(IRQ_CTRL, oldmask)
+    sp.w(bar, log, CTRL, old, 'ctrl: restored')
+    os.close(fd)
+
+
 def main():
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
-    if cmd not in ('scan', 'setup', 'bits', 'ports', 'fm', 'sbon', 'clear'):
+    if cmd not in ('scan', 'setup', 'bits', 'ports', 'fm', 'sbon', 'fmmap', 'clear'):
         sys.exit(__doc__)
     if sp.vm_running():
         sys.exit('a QEMU process is running; stop the VM first (this needs the card idle)')
@@ -251,6 +314,8 @@ def main():
         fm(bar, log)
     elif cmd == 'sbon':
         sbon(bar, log)
+    elif cmd == 'fmmap':
+        fmmap(bar, log)
     elif cmd == 'clear':
         sp.w(bar, log, X804, 0, '0x2a804: 0')
         sp.w(bar, log, CTRL, bar.rd(CTRL) & ~((1 << 24) | 0x4007), 'ctrl: legacy bits off')

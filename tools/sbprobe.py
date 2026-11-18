@@ -333,6 +333,9 @@ def reset(bar, log):
 
 
 def fmflag(bar, log):
+    # Run 1 (2026-11-18, after a power cycle) wrote nothing into the file: the words kept their
+    # power-on garbage. Earlier runs came after `setup`, which writes 0x29854 = 0xc00 as AU30DOS
+    # does, so the capture is first tried with 0x29854 as it is, then with each of bits 10 and 11.
     fd, inb, outb = port_io()
     old = bar.rd(CTRL)
     bar.wr(CTRL, 0x0118326e)
@@ -341,16 +344,24 @@ def fmflag(bar, log):
         outb(ia, reg); time.sleep(0.00004); outb(ia + 1, val); time.sleep(0.00005)
     cases = [('b0 key on', 0x388, 0xb0, 0x25, 0x29950), ('b0 key off', 0x388, 0xb0, 0x05, 0x29950),
              ('b3 key on', 0x388, 0xb3, 0x31, 0x29954), ('bd rhythm', 0x388, 0xbd, 0x3f, 0x29958),
-             ('bank 1 b0 key on', 0x38a, 0xb0, 0x26, 0x299c8)]
-    for name, ia, reg, val, word in cases:
-        opl(ia, reg, val)
-        reads = [hex(bar.rd(word)) for _ in range(4)]
-        opl(ia, reg, val)
-        time.sleep(0.001); late1 = hex(bar.rd(word))
-        opl(ia, reg, val)
-        time.sleep(0.02); late20 = hex(bar.rd(word))
-        log(event='fmflag', case=name, word=hex(word), reads_back_to_back=reads,
-            first_read_after_1ms=late1, first_read_after_20ms=late20)
+             ('bank 1 b0 key on', 0x38a, 0xb0, 0x26, 0x299c8), ('a0 (no flag)', 0x388, 0xa0, 0x41, 0x29948)]
+    for latch in (None, 0x400, 0x800, 0xc00):
+        if latch is not None:
+            bar.wr(0x29854, latch)
+        for i in range(64):
+            bar.wr(0x29900 + 4 * i, 0)
+        log(event='fmflag_latch', latch_written=hex(latch) if latch is not None else 'as found',
+            latch=hex(bar.rd(0x29854)), status=hex(inb(0x388)))
+        for name, ia, reg, val, word in cases:
+            before = hex(bar.rd(word))
+            opl(ia, reg, val)
+            reads = [hex(bar.rd(word)) for _ in range(4)]
+            opl(ia, reg, val)
+            time.sleep(0.001); late1 = hex(bar.rd(word))
+            opl(ia, reg, val)
+            time.sleep(0.02); late20 = hex(bar.rd(word))
+            log(event='fmflag', latch=hex(bar.rd(0x29854)), case=name, word=hex(word), before=before,
+                reads_back_to_back=reads, first_read_after_1ms=late1, first_read_after_20ms=late20)
     for r in range(0xb0, 0xb9):
         opl(0x388, r, 0); opl(0x38a, r, 0)
     opl(0x388, 0xbd, 0)

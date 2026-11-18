@@ -1,0 +1,16 @@
+{"event": "start", "cmd": "fmflag", "argv": ["fmflag", "--log", "/home/z2k-retro/sb11.jsonl"], "chip_ctrl": "0x303260", "utc": "2026-11-18T23:46:33.807316Z"}
+{"event": "release_before", "gcr": "0x303260", "codec_ctrl": "0x8100", "utc": "2026-11-18T23:46:33.807435Z"}
+{"event": "write", "what": "GCR: bit 21 off (the cold card holds still until it is cleared)", "addr": "0x2a00c", "old": "0x303260", "wrote": "0x103260", "readback": "0x103260", "utc": "2026-11-18T23:46:33.807496Z"}
+{"event": "write", "what": "codec link start-up (ALSA sequence)", "addr": "0x29184", "old": "0x8100", "wrote": "0xa8", "readback": "0x1a8", "utc": "2026-11-18T23:46:33.827666Z"}
+{"event": "write", "what": "codec link start-up (ALSA sequence)", "addr": "0x29184", "old": "0x1a8", "wrote": "0x80a8", "readback": "0x81a8", "utc": "2026-11-18T23:46:33.829881Z"}
+{"event": "write", "what": "codec link start-up (ALSA sequence)", "addr": "0x29184", "old": "0x81a8", "wrote": "0x80e8", "readback": "0x81e8", "utc": "2026-11-18T23:46:33.832067Z"}
+{"event": "write", "what": "codec link start-up (ALSA sequence)", "addr": "0x29184", "old": "0x81e8", "wrote": "0x80a8", "readback": "0x81a8", "utc": "2026-11-18T23:46:33.834252Z"}
+{"event": "write", "what": "codec link start-up (ALSA sequence)", "addr": "0x29184", "old": "0x81a8", "wrote": "0xa8", "readback": "0x1a8", "utc": "2026-11-18T23:46:33.836497Z"}
+{"event": "write", "what": "codec link start-up (ALSA sequence)", "addr": "0x29184", "old": "0x1a8", "wrote": "0xe8", "readback": "0x1e8", "utc": "2026-11-18T23:46:33.838709Z"}
+{"event": "release_after", "gcr": "0x103260", "codec_ctrl": "0xd30001e8", "utc": "2026-11-18T23:46:33.891019Z"}
+{"event": "fmflag", "case": "b0 key on", "word": "0x29950", "reads_back_to_back": ["0x18461e0b", "0x18461e0b", "0x18461e0b", "0x18461e0b"], "first_read_after_1ms": "0x18461e0b", "first_read_after_20ms": "0x18461e0b", "utc": "2026-11-18T23:46:33.918238Z"}
+{"event": "fmflag", "case": "b0 key off", "word": "0x29950", "reads_back_to_back": ["0x18461e0b", "0x18461e0b", "0x18461e0b", "0x18461e0b"], "first_read_after_1ms": "0x18461e0b", "first_read_after_20ms": "0x18461e0b", "utc": "2026-11-18T23:46:33.940311Z"}
+{"event": "fmflag", "case": "b3 key on", "word": "0x29954", "reads_back_to_back": ["0x20031206", "0x20031206", "0x20031206", "0x20031206"], "first_read_after_1ms": "0x20031206", "first_read_after_20ms": "0x20031206", "utc": "2026-11-18T23:46:33.962417Z"}
+{"event": "fmflag", "case": "bd rhythm", "word": "0x29958", "reads_back_to_back": ["0x5131106", "0x5131106", "0x5131106", "0x5131106"], "first_read_after_1ms": "0x5131106", "first_read_after_20ms": "0x5131106", "utc": "2026-11-18T23:46:33.984492Z"}
+{"event": "fmflag", "case": "bank 1 b0 key on", "word": "0x299c8", "reads_back_to_back": ["0x1bb350d4", "0x1bb350d4", "0x1bb350d4", "0x1bb350d4"], "first_read_after_1ms": "0x1bb350d4", "first_read_after_20ms": "0x1bb350d4", "utc": "2026-11-18T23:46:34.006560Z"}
+{"event": "write", "what": "ctrl: restored", "addr": "0x2a00c", "old": "0x118326e", "wrote": "0x103260", "readback": "0x103260", "utc": "2026-11-18T23:46:34.011157Z"}

@@ -76,15 +76,44 @@ def xt_setup(bar, log, k=None, sh=None, gin=None, sec=None, dl=0, dr=0, words=No
     log(event='xt_regs', **regs(bar))
 
 
-def capture(bar, log, inp, right, pattern, **kw):
+def chain(bar, log, inputs, out):
+    """FIFO a -> each of inputs in turn (the FIFO fans out), then out -> SRC in."""
+    sp.w(bar, log, sp.VDB_WTDRAM_HEADERLINKS + 4 * sp.RATE, (sp.FIFO_IN << 8) | (XT_IN + inputs[0]), f'vdb hdr: FIFO a -> xt in {inputs[0]}')
+    for a, b in zip(inputs, inputs[1:]):
+        sp.w(bar, log, sp.VDB_WTDRAM_DESTLINKS + 4 * (XT_IN + a), (sp.FIFO_IN << 8) | (XT_IN + b), f'vdb link: FIFO a -> xt in {b}')
+    sp.w(bar, log, sp.VDB_WTDRAM_DESTLINKS + 4 * (XT_IN + inputs[-1]), (out << 8) | sp.SRC_DSTADDR, f'vdb link: xt out {out:#04x} -> SRC in')
+
+
+def unchain(bar, log, inputs):
+    for a in inputs:
+        sp.w(bar, log, sp.VDB_WTDRAM_DESTLINKS + 4 * (XT_IN + a), sp.END, 'vdb link: none')
+
+
+def zero_inputs(bar, log):
+    """The canceller's inputs hold the last sample routed to them (run 1 of this probe: a preset
+    with every input gain on read the earlier cases' constants on inputs it was not fed), so
+    feed all ten zeros before each capture."""
+    ins = list(range(10))
+    sp.setup(bar, log, 0, 13, 0x4000, pattern=[0] * 64)
+    xt_setup(bar, log)
+    chain(bar, log, ins, XT_OUT)
+    sp.flush_and_read(bar, log, flush=False)
+    unchain(bar, log, ins)
+    sp.clear(bar, log)
+
+
+def capture(bar, log, inp, right, pattern, fan=None, stale=False, **kw):
+    """inp: the input fed (fan: several, all fed the same samples). stale: skip zeroing."""
     out = XT_OUT + (1 if right else 0)
+    ins = fan or [inp]
+    if not stale:
+        zero_inputs(bar, log)
     sp.setup(bar, log, 0, 13, 0x4000, pattern=pattern)
     xt_setup(bar, log, **kw)
-    sp.w(bar, log, sp.VDB_WTDRAM_HEADERLINKS + 4 * sp.RATE, (sp.FIFO_IN << 8) | (XT_IN + inp), f'vdb hdr: FIFO a -> xt in {inp}')
-    sp.w(bar, log, sp.VDB_WTDRAM_DESTLINKS + 4 * (XT_IN + inp), (out << 8) | sp.SRC_DSTADDR, f'vdb link: xt out {out:#04x} -> SRC in')
+    chain(bar, log, ins, out)
     r, _, _ = sp.flush_and_read(bar, log, flush=False)
     after = regs(bar)
-    sp.w(bar, log, sp.VDB_WTDRAM_DESTLINKS + 4 * (XT_IN + inp), sp.END, 'vdb link: none')
+    unchain(bar, log, ins)
     sp.w(bar, log, CTRL, 0xa0000000, 'xt control: off')
     sp.clear(bar, log)
     return r, after
@@ -113,11 +142,6 @@ def cases():
         c.append((f'k {k:#06x}', 0, const(0x2000), dict(k={'eql': k}, gin={0: 0x7fff})))
     for s in (1, 2, 3, 4, 8, 15):
         c.append((f'k 0x0800 shift {s}', 0, const(0x2000), dict(k={'eql': 0x0800}, sh={'eql': s}, gin={0: 0x7fff})))
-    for i in (1, 3, 4):
-        c.append((f'input {i}, its own gin', i, const(0x2000), dict(k={'eql': 0x4000}, gin={i: 0x7fff})))
-        c.append((f'input {i}, gin 0 only', i, const(0x2000), dict(k={'eql': 0x4000}, gin={0: 0x7fff})))
-    c.append(('input 5 (right side)', 5, const(0x2000), dict(k={'eqr': 0x4000}, gin={5: 0x7fff})))
-    c.append(('input 9 (right side)', 9, const(0x2000), dict(k={'eqr': 0x4000}, gin={9: 0x7fff})))
     for v in (1, 2, 3, 5, 7, -1, -2, -3, 0x7fff, -0x8000):
         c.append((f'value {v}', 0, const(v), U))
     for v in (1, 2, 3, 5, 7, -1, -3, 0x1001):
@@ -132,12 +156,21 @@ def cases():
                   dict(sec={('eql', 0, 2): 0x4000, ('eql', 0, j): 0x2000} if j != 2 else {('eql', 0, 2): 0x2000}, gin={0: 0x7fff})))
     c.append(('sections 0 and 4, word 2 = 0x2000', 0, const(0x2000), dict(sec={('eql', 0, 2): 0x2000, ('eql', 4, 2): 0x2000}, gin={0: 0x7fff})))
     c.append(('section word 2 = 0x2000 and k 0x2000', 0, const(0x2000), dict(sec={('eql', 0, 2): 0x2000}, k={'eql': 0x2000}, gin={0: 0x7fff})))
-    # cross path: left EQ unit, left-to-right XT block unit, delay
+    # Cross path and delay, in one capture: the impulse goes to inputs 0 and 5; the right output
+    # is EQ right's direct path (input 5, at once) plus XT left of EQ left's output (input 0,
+    # delayed), at half size so the two can be told apart; the left output likewise.
     for d in (0, 1, 5, 13, 31):
-        X = dict(k={'eql': 0x4000, 'xtl': 0x4000}, gin={0: 0x7fff}, dl=d)
-        c.append((f'cross, left delay {d}, right out', 0, impulse(), X))
-    c.append(('cross, right delay 7, right out', 0, impulse(), dict(k={'eql': 0x4000, 'xtl': 0x4000}, gin={0: 0x7fff}, dr=7)))
-    c.append(('cross, xtr block (should feed left)', 0, impulse(), dict(k={'eql': 0x4000, 'xtr': 0x4000}, gin={0: 0x7fff})))
+        X = dict(k={'eql': 0x4000, 'eqr': 0x4000, 'xtl': 0x2000, 'xtr': 0x2000}, gin={0: 0x7fff, 5: 0x7fff}, dl=d, dr=(31 - d) if d else 0)
+        c.append((f'cross, delays left {d} right {(31 - d) if d else 0}', 0, impulse(), dict(X, fan=[0, 5])))
+    c.append(('cross, xtl only (feeds right)', 0, impulse(), dict(k={'eql': 0x4000, 'xtl': 0x4000}, gin={0: 0x7fff})))
+    c.append(('cross, xtr only (feeds left)', 5, impulse(), dict(k={'eqr': 0x4000, 'xtr': 0x4000}, gin={5: 0x7fff})))
+    # input mapping, now with the inputs zeroed first (run 1 was confounded by held inputs)
+    for i in range(10):
+        c.append((f'input {i}, own gain only', i, const(0x2000), dict(k={'eql': 0x4000, 'eqr': 0x4000}, gin={i: 0x7fff})))
+    for i in (1, 6):
+        c.append((f'input {i}, gain {i - 1} only', i, const(0x2000), dict(k={'eql': 0x4000, 'eqr': 0x4000}, gin={i - 1: 0x7fff})))
+    c.append(('input 1 then input 0 without zeroing (held input)', 0, const(0x1000),
+              dict(k={'eql': 0x4000}, gin={0: 0x7fff, 1: 0x7fff}, stale=True)))
     return c
 
 
@@ -148,9 +181,11 @@ def preset_cases():
     except OSError:
         return c
     for name, p in pre.items():
-        words = {int(a, 16): int(v, 16) for a, v in p['words'].items()}
-        kw = dict(words=words, ctl=int(p['ctl'], 16))
+        allw = {int(a, 16): int(v, 16) for a, v in p['words'].items()}
         for inp in (0, 5):
+            # only the fed input's gain, so nothing else can reach the outputs
+            words = {a: v for a, v in allw.items() if not (GIN <= a < GIN + 40) or a == GIN + 4 * inp}
+            kw = dict(words=words, ctl=int(p['ctl'], 16))
             c.append((f'{name}, const 0x2000, input {inp}', inp, const(0x2000), kw))
             c.append((f'{name}, impulse 0x4000, input {inp}', inp, impulse(), kw))
     return c
@@ -182,6 +217,9 @@ def main():
         import numpy as np
         rows, names = [], []
         for name, inp, pat, kw in cases() + preset_cases():
+            if kw.get('stale'):
+                zero_inputs(bar, quiet)
+                capture(bar, quiet, 1, False, const(0x2000), stale=True, k={'eql': 0x4000}, gin={1: 0x7fff})
             res = []
             for right in (False, True):
                 r, _ = capture(bar, quiet, inp, right, pat, **kw)

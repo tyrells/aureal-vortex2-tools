@@ -5,13 +5,14 @@
    (50 ms at the start of a 1 s loop, the same seed as a3d3test), in front at 2 m, and one
    manual reflection 0.4 s late, so the direct burst and its echo are apart in time and each
    can be measured on its own. For a 44.1 kHz and then a 22.05 kHz source:
-     direct only 5 s; echo from the left with the source's EQ at 1, 0.5, 0.2 and 0.05,
-     8 s each; source and reflection at 20 m, then 80 m, 8 s each; direct only 4 s.
-   Run 1 and run 2: one reflection matched the model within 0.3 dB at every frequency, but
-   its voice's filter stayed open (0xcf); the reflection's own SetEQ changed nothing. The
-   3.0 sample's reflections had the filter at 0xa1, which the source's EQ or distance
-   should reach. Only one copy runs at a time.
-   Nothing shows on screen until a box at the end. About 2 minutes 15 s.
+     direct only 5 s; echo from the left with the reflection's gain scale at 1, 0.3, 0.1
+     and 0.03; the reflection alone moved to 30 m; head-relative; the source's reflection
+     gain scale at 0.2; 6 s each; direct only 4 s.
+   Runs 1-3: one reflection matched the model within 0.3 dB, but its voice's filter stayed
+   open (0xcf) whatever the reflection's EQ, the source's EQ or the distance (20 m, 80 m).
+   The 3.0 sample's reflections had it at 0xa1, with gains near 0xa5; this tries the
+   reflection's own level and placement. Only one copy runs at a time.
+   Nothing shows on screen until a box at the end. About 2 minutes.
    Logs to C:\\REFLTEST.LOG. */
 #include <windows.h>
 #include <objbase.h>
@@ -130,21 +131,19 @@ void entry(void)
         wsprintfA(b, "Play %lu Hz", rates[r]); line(b, -1);
         phase("direct only"); run(5000);
         if (refl) { refl->lpVtbl->SetPosition3f(refl, -2, 0, 0); refl->lpVtbl->SetGainScale(refl, 1.0f); }
-        phase("echo from the left, source EQ 1"); run(8000);
-        line("source SetEq(0.5)", src->lpVtbl->SetEq(src, 0.5f));
-        phase("echo from the left, source EQ 0.5"); run(8000);
-        line("source SetEq(0.2)", src->lpVtbl->SetEq(src, 0.2f));
-        phase("echo from the left, source EQ 0.2"); run(8000);
-        line("source SetEq(0.05)", src->lpVtbl->SetEq(src, 0.05f));
-        phase("echo from the left, source EQ 0.05"); run(8000);
-        src->lpVtbl->SetEq(src, 1.0f);
-        src->lpVtbl->SetPosition3f(src, 0, 0, -20);
-        if (refl) refl->lpVtbl->SetPosition3f(refl, -20, 0, 0);
-        phase("source and reflection at 20 m"); run(8000);
-        src->lpVtbl->SetPosition3f(src, 0, 0, -80);
-        if (refl) refl->lpVtbl->SetPosition3f(refl, -80, 0, 0);
-        phase("source and reflection at 80 m"); run(8000);
-        src->lpVtbl->SetPosition3f(src, 0, 0, -2);
+        phase("echo from the left, reflection gain 1"); run(6000);
+        if (refl) line("SetGainScale(0.3)", refl->lpVtbl->SetGainScale(refl, 0.3f));
+        phase("reflection gain 0.3"); run(6000);
+        if (refl) line("SetGainScale(0.1)", refl->lpVtbl->SetGainScale(refl, 0.1f));
+        phase("reflection gain 0.1"); run(6000);
+        if (refl) line("SetGainScale(0.03)", refl->lpVtbl->SetGainScale(refl, 0.03f));
+        phase("reflection gain 0.03"); run(6000);
+        if (refl) { refl->lpVtbl->SetGainScale(refl, 1.0f); refl->lpVtbl->SetPosition3f(refl, -30, 0, 0); }
+        phase("reflection alone at 30 m"); run(6000);
+        if (refl) { refl->lpVtbl->SetPosition3f(refl, -2, 0, 0); refl->lpVtbl->SetTransformMode(refl, A3DREFLECTION_TRANSFORMMODE_HEADRELATIVE); }
+        phase("reflection head-relative"); run(6000);
+        line("source SetReflectionGainScale(0.2)", src->lpVtbl->SetReflectionGainScale(src, 0.2f));
+        phase("source reflection gain scale 0.2"); run(6000);
         if (refl) refl->lpVtbl->SetGainScale(refl, 0.0f);
         phase("direct only again"); run(4000);
         src->lpVtbl->Stop(src);

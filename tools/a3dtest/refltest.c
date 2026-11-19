@@ -5,10 +5,12 @@
    (50 ms at the start of a 1 s loop, the same seed as a3d3test), in front at 2 m, and one
    manual reflection 0.4 s late, so the direct burst and its echo are apart in time and each
    can be measured on its own. For a 44.1 kHz and then a 22.05 kHz source:
-     direct only 5 s; echo from the left with the reflection's EQ at 1, 0.5, 0.2 and 0.05,
-     8 s each; echo from the front with EQ 1 and 0.2, 8 s each; direct only 4 s.
-   Run 1 (EQ at 1) found the reflection voice's filter open and card and model within 1 dB;
-   the 3.0 sample's reflections had the filter at 0xa1, which the lower EQ values should reach.
+     direct only 5 s; echo from the left with the source's EQ at 1, 0.5, 0.2 and 0.05,
+     8 s each; source and reflection at 20 m, then 80 m, 8 s each; direct only 4 s.
+   Run 1 and run 2: one reflection matched the model within 0.3 dB at every frequency, but
+   its voice's filter stayed open (0xcf); the reflection's own SetEQ changed nothing. The
+   3.0 sample's reflections had the filter at 0xa1, which the source's EQ or distance
+   should reach. Only one copy runs at a time.
    Nothing shows on screen until a box at the end. About 2 minutes 15 s.
    Logs to C:\\REFLTEST.LOG. */
 #include <windows.h>
@@ -128,17 +130,21 @@ void entry(void)
         wsprintfA(b, "Play %lu Hz", rates[r]); line(b, -1);
         phase("direct only"); run(5000);
         if (refl) { refl->lpVtbl->SetPosition3f(refl, -2, 0, 0); refl->lpVtbl->SetGainScale(refl, 1.0f); }
-        phase("echo from the left, EQ 1"); run(8000);
-        if (refl) line("SetEQ(0.5)", refl->lpVtbl->SetEQ(refl, 0.5f));
-        phase("echo from the left, EQ 0.5"); run(8000);
-        if (refl) line("SetEQ(0.2)", refl->lpVtbl->SetEQ(refl, 0.2f));
-        phase("echo from the left, EQ 0.2"); run(8000);
-        if (refl) line("SetEQ(0.05)", refl->lpVtbl->SetEQ(refl, 0.05f));
-        phase("echo from the left, EQ 0.05"); run(8000);
-        if (refl) { refl->lpVtbl->SetPosition3f(refl, 0, 0, -2); line("SetEQ(1)", refl->lpVtbl->SetEQ(refl, 1.0f)); }
-        phase("echo from the front, EQ 1"); run(8000);
-        if (refl) line("SetEQ(0.2)", refl->lpVtbl->SetEQ(refl, 0.2f));
-        phase("echo from the front, EQ 0.2"); run(8000);
+        phase("echo from the left, source EQ 1"); run(8000);
+        line("source SetEq(0.5)", src->lpVtbl->SetEq(src, 0.5f));
+        phase("echo from the left, source EQ 0.5"); run(8000);
+        line("source SetEq(0.2)", src->lpVtbl->SetEq(src, 0.2f));
+        phase("echo from the left, source EQ 0.2"); run(8000);
+        line("source SetEq(0.05)", src->lpVtbl->SetEq(src, 0.05f));
+        phase("echo from the left, source EQ 0.05"); run(8000);
+        src->lpVtbl->SetEq(src, 1.0f);
+        src->lpVtbl->SetPosition3f(src, 0, 0, -20);
+        if (refl) refl->lpVtbl->SetPosition3f(refl, -20, 0, 0);
+        phase("source and reflection at 20 m"); run(8000);
+        src->lpVtbl->SetPosition3f(src, 0, 0, -80);
+        if (refl) refl->lpVtbl->SetPosition3f(refl, -80, 0, 0);
+        phase("source and reflection at 80 m"); run(8000);
+        src->lpVtbl->SetPosition3f(src, 0, 0, -2);
         if (refl) refl->lpVtbl->SetGainScale(refl, 0.0f);
         phase("direct only again"); run(4000);
         src->lpVtbl->Stop(src);

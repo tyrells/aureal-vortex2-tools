@@ -221,7 +221,7 @@ def setup(bar, log, frac, wing, ratio, impulse_at=8, amp=0x4000, dmaptr=32, patt
     #    impulse had started coming out and lost the first taps)
 
 
-def flush_and_read(bar, log, reads=0, gap=0.0, flush=True):
+def flush_and_read(bar, log, reads=0, gap=0.0, flush=True, poke=None, poke_at=None):
     k, a, b = SRC_K, FIFO_IN, FIFO_OUT
     # 5. pump: the flush bit on the input FIFO (mask bits 31-22 left 0 = use new values)
     if flush:
@@ -238,8 +238,15 @@ def flush_and_read(bar, log, reads=0, gap=0.0, flush=True):
     raw = []
     bar.wr(VDB_ACTIVE_SR, rd(VDB_ACTIVE_SR) | (1 << RATE))   # vdb rate on: the chain starts now
     t0 = time.perf_counter()
+    # poke: a list of (address, value) written during the capture, all on every pass, or
+    # once each when poke_at (seconds after the start) has passed (wtprobe parmpoke)
+    poked = False
     while time.perf_counter() - t0 < 0.003:
         raw.append((rd(PAR6), rd(DB0), rd(DB1)))
+        if poke and (poke_at is None or (not poked and time.perf_counter() - t0 >= poke_at)):
+            for pa, pv in poke:
+                bar.wr(pa, pv)
+            poked = True
     order, seen = [], {}
     for p6, v0, v1 in raw:
         rp = (p6 >> 8) & 0xff

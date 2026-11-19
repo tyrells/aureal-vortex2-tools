@@ -39,6 +39,10 @@ Run on the X79 host with the card bound to vfio-pci and no VM running, like srcp
                                              sends): a full-scale square wave through cut-offs 0xa1,
                                              0xb1 and open, at 48, 44.1 and 12 kHz rates, on first-half
                                              voice 0 and second-half voice 8 (about 20 s)
+  sudo ./wtprobe.py parmpoke [--out FILE.npz] whether rewriting PARM0/PARM1 (as the driver does to the
+                                             reflection voices every 2.4 ms) disturbs the low-pass:
+                                             a pulse through cut-off 0xa1 with the words rewritten
+                                             once or continually during the capture (about 5 s)
   sudo ./wtprobe.py clear
 
 The chain: a second-half voice (global 40, local 8) with DSREG clear, so it plays onto its half's
@@ -149,14 +153,14 @@ def voice_stop(bar, log):
 
 
 def capture_bus(bar, log, bus, pan, cho, rev, ds=False, gain=0xcf, level=None, go=True, ingain=0xcf, state=7, filt=0xcf,
-                pattern=None, fb=0, rate=0xa000):
+                pattern=None, fb=0, rate=0xa000, poke=None, poke_at=None):
     sp.SRC_FEED = ALL[bus]
     sp.setup(bar, log, 0, 13, 0x4000, pattern=[0] * 64)
     voice_setup(bar, log, pan, cho, rev, ds=ds, gain=gain, level=level, ingain=ingain, state=state, filt=filt,
                 pattern=pattern, fb=fb, rate=rate)
     if go:
         voice_go(bar)
-    r, _, _ = sp.flush_and_read(bar, log, flush=False)
+    r, _, _ = sp.flush_and_read(bar, log, flush=False, poke=poke, poke_at=poke_at)
     voice_stop(bar, log)
     sp.clear(bar, log)
     # the level: mean over the settled part (run 1 alternated sample by sample with the FIFO's
@@ -323,7 +327,7 @@ def ramp_summary(out, t_fire):
 
 def main():
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
-    if cmd not in ('start', 'bus', 'sweep', 'levels', 'gains', 'state', 'mix', 'own', 'reso', 'ramp', 'filtrate', 'sendfilt', 'clear'):
+    if cmd not in ('start', 'bus', 'sweep', 'levels', 'gains', 'state', 'mix', 'own', 'reso', 'ramp', 'filtrate', 'sendfilt', 'parmpoke', 'clear'):
         sys.exit(__doc__)
     if sp.vm_running():
         sys.exit('a QEMU process is running; stop the VM first (this needs the card idle)')
@@ -541,6 +545,46 @@ def main():
         set_voice(40)
         path = sp.arg('--out', 'wtprobe-sendfilt.npz', str)
         np.savez(path, rows=np.array(rows))
+        log(event='saved', path=path, cases=len(rows))
+    elif cmd == 'parmpoke':
+        # sendfilt found the same low-pass on every path, so the sends are not the cause of the
+        # reflections' extra treble on the card. The driver rewrites each reflection voice's PARM0
+        # about every 2.4 ms (the same cut-off and gain, the rate nudged between 0x9aa0 and
+        # 0x9af8) and PARM1 with it. If a write disturbs the filter (resets its state, or
+        # restarts a glide), the voice would let more treble through on the card than in the
+        # model, which leaves the filter alone. Here a 32-word pulse at 12 kHz (128 output
+        # samples high) through cut-off 0xa1 on the direct-stream pair of first-half voice 0,
+        # with nothing written, then with PARM0/PARM1 rewritten once mid-pulse or on every
+        # pass of the capture loop (every few microseconds), with the same words or the rate
+        # nudged, and PARM1 alone.
+        import numpy as np
+        set_voice(0)
+        mute_others(bar, log)
+        pulse = [0x4000] * 32 + [0] * 32
+        rate, filt, gain = 0x5000, 0xa1, 0xcf
+        p0 = (filt << 24) | (gain << 16) | (rate & 0xfffe)
+        p0n = (filt << 24) | (gain << 16) | ((rate + 0x20) & 0xfffe)
+        cases = [('none', None, None),
+                 ('PARM0 same, once at 1.2 ms', [(WT_PARM, p0)], 0.0012),
+                 ('PARM0+1 same, once at 1.2 ms', [(WT_PARM, p0), (WT_PARM + 4, p0 | 1)], 0.0012),
+                 ('PARM0 same, every pass', [(WT_PARM, p0)], None),
+                 ('PARM0+1 same, every pass', [(WT_PARM, p0), (WT_PARM + 4, p0 | 1)], None),
+                 ('PARM0+1 rate nudged, every pass', [(WT_PARM, p0n), (WT_PARM + 4, p0n | 1)], None),
+                 ('PARM0+1 rate nudged, once at 1.2 ms', [(WT_PARM, p0n), (WT_PARM + 4, p0n | 1)], 0.0012),
+                 ('PARM1 same, every pass', [(WT_PARM + 4, p0 | 1)], None)]
+        rows = []
+        for n, (name, poke, at) in enumerate(cases):
+            for rep in range(2):
+                lv, r = capture_bus(bar, quiet, 'ds_left', 0, 0, 0, ds=True, filt=filt, gain=gain,
+                                    pattern=pulse, rate=rate, poke=poke, poke_at=at)
+                rows.append((n, rep, *((r + [0] * 200)[:200])))
+                log(event='parmpoke', case=name, rep=rep, peak=max(r, key=abs) if r else 0,
+                    head=[x for x in r if x][:40])
+        for lv in range(32):
+            bar.wr(BANK + 0x200 + lv * 0x10 + 12, 0)
+        set_voice(40)
+        path = sp.arg('--out', 'wtprobe-parmpoke.npz', str)
+        np.savez(path, rows=np.array(rows), cases=np.array([c[0] for c in cases]))
         log(event='saved', path=path, cases=len(rows))
     elif cmd == 'ramp':
         # Smooth mute: a voice playing at gain 0xcf, state 7, then 1 written to its mute word

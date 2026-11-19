@@ -34,4 +34,12 @@ if [ -f "$SDK3_INC/ia3dapi.h" ]; then
         -Wl,--disable-dynamicbase -Wl,--disable-nxcompat -Wl,--disable-reloc-section \
         -o a3d3test.exe a3d3test.c -lkernel32 -luser32 -lole32 -luuid -lgcc
     echo built a3d3test.exe
+    $CC -std=gnu99 -O2 -march=i586 -mfpmath=387 -ffreestanding -fno-builtin -fno-stack-protector \
+        -fno-asynchronous-unwind-tables -Wall -I"$SDK3_INC" \
+        -nostdlib -Wl,--entry,_entry -Wl,--subsystem,windows:4.0 \
+        -Wl,--major-os-version,4 -Wl,--minor-os-version,0 \
+        -Wl,--major-subsystem-version,4 -Wl,--minor-subsystem-version,0 \
+        -Wl,--disable-dynamicbase -Wl,--disable-nxcompat -Wl,--disable-reloc-section \
+        -o refltest.exe refltest.c -lkernel32 -luser32 -lole32 -luuid -lgcc
+    echo built refltest.exe
 fi

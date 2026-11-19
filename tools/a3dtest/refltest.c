@@ -5,8 +5,12 @@
    (50 ms at the start of a 1 s loop, the same seed as a3d3test), in front at 2 m, and one
    manual reflection 0.4 s late, so the direct burst and its echo are apart in time and each
    can be measured on its own. For a 44.1 kHz and then a 22.05 kHz source:
-     direct only 6 s, echo from the left 15 s, echo from the front 15 s, direct only 4 s.
-   About 85 s. Logs to C:\REFLTEST.LOG. */
+     direct only 5 s; echo from the left with the reflection's EQ at 1, 0.5, 0.2 and 0.05,
+     8 s each; echo from the front with EQ 1 and 0.2, 8 s each; direct only 4 s.
+   Run 1 (EQ at 1) found the reflection voice's filter open and card and model within 1 dB;
+   the 3.0 sample's reflections had the filter at 0xa1, which the lower EQ values should reach.
+   Nothing shows on screen until a box at the end. About 2 minutes 15 s.
+   Logs to C:\\REFLTEST.LOG. */
 #include <windows.h>
 #include <objbase.h>
 #include <initguid.h>
@@ -88,6 +92,12 @@ void entry(void)
     int r;
 
     QueryPerformanceFrequency(&g_qf);
+    /* one copy at a time: run 1 (2026-11-18) was started twice and the two overlapped */
+    CreateMutexA(NULL, TRUE, "refltest-running");
+    if (GetLastError() == ERROR_ALREADY_EXISTS) {
+        MessageBoxA(NULL, "refltest is already running; it shows a box when it finishes.", "refltest", MB_OK);
+        ExitProcess(0);
+    }
     g_log = CreateFileA("C:\\REFLTEST.LOG", GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, 0, NULL);
     CoInitialize(NULL);
     hr = CoCreateInstance(&CLSID_A3dApi, NULL, CLSCTX_INPROC_SERVER, &IID_IA3d5, (void **) &a3d);
@@ -116,11 +126,19 @@ void entry(void)
         run(1000);
         src->lpVtbl->Play(src, A3D_LOOPED);
         wsprintfA(b, "Play %lu Hz", rates[r]); line(b, -1);
-        phase("direct only"); run(6000);
+        phase("direct only"); run(5000);
         if (refl) { refl->lpVtbl->SetPosition3f(refl, -2, 0, 0); refl->lpVtbl->SetGainScale(refl, 1.0f); }
-        phase("echo from the left"); run(15000);
-        if (refl) refl->lpVtbl->SetPosition3f(refl, 0, 0, -2);
-        phase("echo from the front"); run(15000);
+        phase("echo from the left, EQ 1"); run(8000);
+        if (refl) line("SetEQ(0.5)", refl->lpVtbl->SetEQ(refl, 0.5f));
+        phase("echo from the left, EQ 0.5"); run(8000);
+        if (refl) line("SetEQ(0.2)", refl->lpVtbl->SetEQ(refl, 0.2f));
+        phase("echo from the left, EQ 0.2"); run(8000);
+        if (refl) line("SetEQ(0.05)", refl->lpVtbl->SetEQ(refl, 0.05f));
+        phase("echo from the left, EQ 0.05"); run(8000);
+        if (refl) { refl->lpVtbl->SetPosition3f(refl, 0, 0, -2); line("SetEQ(1)", refl->lpVtbl->SetEQ(refl, 1.0f)); }
+        phase("echo from the front, EQ 1"); run(8000);
+        if (refl) line("SetEQ(0.2)", refl->lpVtbl->SetEQ(refl, 0.2f));
+        phase("echo from the front, EQ 0.2"); run(8000);
         if (refl) refl->lpVtbl->SetGainScale(refl, 0.0f);
         phase("direct only again"); run(4000);
         src->lpVtbl->Stop(src);

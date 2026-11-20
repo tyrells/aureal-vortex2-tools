@@ -270,6 +270,8 @@ main(int argc, char **argv)
 
         if (sscanf(line, "%lf %3s %31s %7s %x", &t, rw, as, via, &val) < 5)
             continue;
+        if (!strcmp(via, "port"))
+            continue; /* legacy port I/O (the MPU-401), not a chip register */
         char *x = strstr(line, " x");
         if (x)
             rep = atoi(x + 2);
